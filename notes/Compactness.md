@@ -29,3 +29,11 @@ collect 6 sets of rankings of 100 districts as data
 extract first principle component
 calculate top metrics for each district
 trained AdaBoosted decision trees, SVM's, and random forests
+
+validated by mixing group size, mode of administration, type of respondent (groduade, undergrad, amzn mturk)
+created 6 groups from above types of people, trained on 5, predicted last group. no large variation when using different groups as test set
+
+hypothesis: all reasonable humans grade districts similarly
+took 96 public officials, 102 other, had them rank 20 districts.
+found no statistically significant correlations among different groups of respondents
+found measure favors: square, with less arms, islands, pockets, or jagged edges
