@@ -1,0 +1,10 @@
+[package]
+name = "shp_raster"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+indicatif = "0.17.8"
+png = "0.17.13"
+rand = "0.8.5"
+shapefile = "0.6.0"
