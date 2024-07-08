@@ -9,10 +9,15 @@ from load_data import *
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
 # repro data
-data = load_to_file(
-    "data/training_labels.RData",
-    "data/full-parsed-data.shp",
-    "data/full-parsed-pixels.csv",
-    "train_labels",
-)
-data = pd.read_csv("data/full-parsed-pixels.csv")
+# load_raster()
+
+used = pd.read_csv("data/raster-rank.csv")
+print(used)
+x_keys = list(used.keys())
+x_keys.remove("district")
+x_keys.remove("rank")
+x = used[x_keys]
+y = used["rank"]
+print(x)
+print(y)
+x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=100, shuffle=True)

@@ -7,7 +7,22 @@ from compactness_scores import all_measures
 from rdata import df_from_rdata
 
 
-def load_to_file(r_path, output_shp_path, output_csv_path, var_name) -> gp.GeoDataFrame:
+def load_raster():
+    data = load_to_file(
+        "data/training_labels.RData",
+        "data/full-parsed-data.shp",
+        "train_labels",
+    )
+    raster = pd.read_csv("data/rasterized-data.csv")
+    # used = raster.merge(right=data[["district", "rank"]], on="district")
+    raster = raster.reset_index()
+    raster["district"] = raster["index"]
+    raster = raster.drop("index", axis=1)
+    raster["rank"] = data["rank"]
+    raster.to_csv("data/raster-rank.csv")
+
+
+def load_to_file(r_path, output_shp_path, var_name) -> gp.GeoDataFrame:
     data = df_from_rdata(r_path, var_name)
     data = data.dropna()
     data = data.rename(columns={"compactness": "rank"})
@@ -16,8 +31,6 @@ def load_to_file(r_path, output_shp_path, output_csv_path, var_name) -> gp.GeoDa
     data = load_districts(data)
     data["idx"] = range(data.shape[0])
     data = data.set_index("idx")
-    pixels = rasterize_data(data)
-    pixels.to_csv(output_csv_path)
     all_measures(data, True)
     data.to_file(output_shp_path)
     return data
@@ -77,38 +90,3 @@ def _parse_district_ids(d: pd.DataFrame, key) -> None:
         )
 
     d[key] = d[key].apply(parse_single_id)
-
-
-def rasterize_data(d: gp.GeoDataFrame):
-    xmin, ymin, xmax, ymax = d.total_bounds
-    resolution = 10000
-
-    width = int((xmax - xmin) / resolution)
-    height = int((ymax - ymin) / resolution)
-
-    transform = rasterio.transform.from_origin(xmin, ymax, resolution, resolution)
-
-    print(d["geometry"].shape)
-
-    raster = d["geometry"].apply(
-        lambda x: rasterize(
-            [(x, 1)],
-            out_shape=(height, width),
-            transform=transform,
-            fill=0,
-            all_touched=True,
-            dtype="float32",
-        ).flatten()
-    )
-    raster = pd.DataFrame(raster.tolist()).add_prefix("p")
-    print("raster")
-    print(raster)
-    print("d")
-    print(d)
-    print("joined")
-    print(d.join(raster))
-
-    d = d.join(raster, how="left")
-    print(d)
-
-    return d
