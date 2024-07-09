@@ -52,9 +52,8 @@ fn main() {
         width,
         sample_size,
     } = Args::new(&env::args().collect());
-    let rasterizer: Rasterizer =
-        Rasterizer::from_shp(&input, height, width, sample_size, "district")
-            .expect(&format!("Could not find input file: {}", input));
+    let rasterizer = Rasterizer::from_shp(&input, height, width, sample_size, "district")
+        .expect(&format!("Could not find input file: {}", input));
     rasterizer
         .write_csv(&output)
         .expect("failed to write to csv");
