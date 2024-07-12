@@ -4,6 +4,7 @@ in pkgs.mkShell {
   packages = with pkgs; [
     (python3.withPackages (python-pkgs: with python-pkgs; [
       pandas
+      pyyaml
       black
       isort
       tensorflow

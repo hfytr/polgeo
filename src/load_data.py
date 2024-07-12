@@ -16,7 +16,6 @@ def load_raster():
     raster = pd.read_csv("data/rasterized-data.csv")
     # used = raster.merge(right=data[["district", "rank"]], on="district")
     raster = raster.reset_index()
-    raster["district"] = raster["index"]
     raster = raster.drop("index", axis=1)
     raster["rank"] = data["rank"]
     raster.to_csv("data/raster-rank.csv")

@@ -11,12 +11,12 @@ pub fn write_csv(
     let keys_string = keys
         .iter()
         .fold(String::new(), |acc, elem| format!("{acc}{elem}"));
-    let mut file_string = format!("id, {keys_string}\n");
+    let mut file_string = format!("district, {keys_string}\n");
     for (row, id) in zip(data.iter(), ids.iter()) {
         let row_data = row
             .iter()
             .fold(String::new(), |acc, elem| format!("{acc}, {elem}"));
-        file_string.push_str(&format!("{id}, {row_data}"));
+        file_string.push_str(&format!("{id}{row_data}"));
         file_string.push('\n');
     }
     let mut file = File::create(path)?;
