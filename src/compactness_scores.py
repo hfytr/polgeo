@@ -35,7 +35,6 @@ def single_measure(d: gp.GeoDataFrame, inplace: bool, measure: str):
 
 def __convex_hull(d: gp.GeoDataFrame):
     hull_area = d["geometry"].apply(lambda x: x.convex_hull.area)
-    return d.area / hull_area
 
 
 def __boyce_clark(d: gp.GeoDataFrame):

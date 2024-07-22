@@ -1,26 +1,27 @@
+
 let
   pkgs = import <nixpkgs> {};
+  python = pkgs.python311;
 in pkgs.mkShell {
   packages = with pkgs; [
-    (python3.withPackages (python-pkgs: with python-pkgs; [
+    (python.withPackages (python-pkgs: with python-pkgs; [
       pandas
+      pip
       pyyaml
       black
       isort
       tensorflow
       keras
-      scikit-learn
       geopandas
-      rasterio
       gurobipy
       scipy
+      scikit-learn
       shapely
       matplotlib
       rpy2
-      # networkx
-      # libpysal
     ]))
     R
+    python
     gurobi
     pyright
   ];

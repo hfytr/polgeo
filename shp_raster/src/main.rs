@@ -16,6 +16,7 @@ struct Args {
 
 impl Args {
     fn new(args: &Vec<String>) -> Args {
+        dbg!(&args);
         Self {
             input: args
                 .get(1)

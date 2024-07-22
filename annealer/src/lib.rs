@@ -7,6 +7,7 @@ use pyo3::{
 mod anneal;
 
 ///@param objective callable objective function
+///@param temperature callable temperature function
 ///@param precinct_in: a vector of all precincts, and which pixel they are in; pixels are row *
 ///width + col
 ///@param adj a 2d vector adjacency list for the precincts
@@ -63,7 +64,7 @@ fn optimize_func(
 }
 
 #[pymodule]
-fn sim_anneal(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn annealer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(optimize_func, m)?)?;
     Ok(())
 }

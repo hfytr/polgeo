@@ -100,9 +100,10 @@ impl<F: Fn(&[Vec<bool>]) -> f64, G: Fn(f64) -> f64> Annealer<F, G> {
         &self,
         assignment_indexer: Option<H>,
     ) -> Vec<Vec<bool>> {
+        let default_indexer = |x| self.cur_state.1[x];
         let assignment_indexer: &dyn Fn(usize) -> usize = match &assignment_indexer {
             Some(x) => x,
-            None => &|x| self.cur_state.1[x],
+            None => &default_indexer,
         };
         let mut result = vec![vec![false; self.precinct_in.len()]; self.num_districts];
         for precinct in self.precinct_in.iter() {
@@ -122,7 +123,9 @@ impl<F: Fn(&[Vec<bool>]) -> f64, G: Fn(f64) -> f64> Annealer<F, G> {
                     self.adj[*node]
                         .iter()
                         .filter_map(|neighbor| {
-                            if self.cur_state.1[*neighbor] == self.cur_state.1[*node] {
+                            if self.cur_state.1[*neighbor] == self.cur_state.1[*node]
+                                || !self.feasible(*node, self.cur_state.1[*neighbor])
+                            {
                                 None
                             } else {
                                 Some(self.cur_state.1[*neighbor])
@@ -145,7 +148,7 @@ impl<F: Fn(&[Vec<bool>]) -> f64, G: Fn(f64) -> f64> Annealer<F, G> {
             for (i, probability) in next_probabilities.enumerate() {
                 accumulated_probability += probability;
                 if accumulated_probability > rand {
-                    self.cur_state.1[scores[i].0] = scores[i].1;
+                    self.update_borders(scores[i].0, scores[i].1);
                     self.cur_state.0 =
                         (self.objective)(&self.state_as_input::<fn(usize) -> usize>(None));
                     if self.cur_state.0 > self.best.0 {
@@ -169,9 +172,9 @@ impl<F: Fn(&[Vec<bool>]) -> f64, G: Fn(f64) -> f64> Annealer<F, G> {
         score
     }
 
-    fn update_borders(&mut self, node: usize, new_state: usize) {
+    fn update_borders(&mut self, node: usize, district: usize) {
         for neighbor in self.adj[node].iter() {
-            if new_state == self.cur_state.1[*neighbor]
+            if district == self.cur_state.1[*neighbor]
                 && self.cur_state.1[node] != self.cur_state.1[*neighbor]
             {
                 *self.border_nodes.get_mut(neighbor).unwrap() -= 1;
@@ -184,7 +187,7 @@ impl<F: Fn(&[Vec<bool>]) -> f64, G: Fn(f64) -> f64> Annealer<F, G> {
         }
     }
 
-    fn feasible(&self) -> bool {
+    fn feasible(&self, changed_node: usize, district: usize) -> bool {
         let populations = self.population.iter().enumerate().fold(
             vec![0_usize; self.num_districts],
             |mut acc, (i, elem)| {
@@ -204,9 +207,14 @@ impl<F: Fn(&[Vec<bool>]) -> f64, G: Fn(f64) -> f64> Annealer<F, G> {
             if vis[node] != self.num_districts {
                 continue;
             }
-            if !flood_filled[self.cur_state.1[node]] {
-                self.feasible_helper(node, &mut vis);
-                flood_filled[self.cur_state.1[node]] = true;
+            let node_district = if node == changed_node {
+                self.cur_state.1[node]
+            } else {
+                district
+            };
+            if !flood_filled[node_district] {
+                self.feasible_helper(node, &mut vis, node, district);
+                flood_filled[node_district] = true;
             } else if vis[node] == self.num_districts {
                 return false;
             }
@@ -214,14 +222,24 @@ impl<F: Fn(&[Vec<bool>]) -> f64, G: Fn(f64) -> f64> Annealer<F, G> {
         true
     }
 
-    fn feasible_helper(&self, node: usize, vis: &mut Vec<usize>) {
-        vis[node] = self.cur_state.1[node];
+    fn feasible_helper(
+        &self,
+        node: usize,
+        vis: &mut Vec<usize>,
+        changed_node: usize,
+        district: usize,
+    ) {
+        vis[node] = if node == changed_node {
+            self.cur_state.1[node]
+        } else {
+            district
+        };
         for next in self.adj[node]
             .iter()
             .filter(|n| vis[**n] == vis[node])
             .collect::<Vec<&usize>>()
         {
-            self.feasible_helper(*next, vis);
+            self.feasible_helper(*next, vis, changed_node, district);
         }
     }
 }

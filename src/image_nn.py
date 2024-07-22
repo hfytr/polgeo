@@ -17,7 +17,7 @@ SIDE_LENGTH = 30
 
 
 # repro data
-# load_raster()
+# data = load_raster()
 
 
 def create_model():
@@ -47,8 +47,8 @@ def create_model():
     )
     model.compile(
         optimizer=keras.optimizers.Adam(),
-        loss=keras.losses.MeanSquaredError(),
-        metrics=[keras.metrics.MeanSquaredError()],
+        loss=keras.losses.MeanAbsolutePercentageError(),
+        metrics=[keras.metrics.MeanAbsolutePercentageError()],
     )
     print(model.summary())
     return model
@@ -89,7 +89,7 @@ def train_model():
         x_train,
         y_train,
         batch_size=batch_size,
-        epochs=50,
+        epochs=5000,
         validation_data=(x_test, y_test),
         callbacks=[cp_callback],
     )
@@ -123,8 +123,8 @@ sys.stdout = open(os.devnull, "w")
 val_loss = list(train_model())[-1]
 sys.stdout = sys.__stdout__
 print(val_loss)
-while val_loss > 0.07:
-    sys.stdout = open(os.devnull, "w")
+while val_loss > 10:
+    # sys.stdout = open(os.devnull, "w")
     val_loss = list(train_model())[-1]
-    sys.stdout = sys.__stdout__
+    # sys.stdout = sys.__stdout__
     print(val_loss)

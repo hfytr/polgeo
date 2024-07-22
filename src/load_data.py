@@ -1,7 +1,5 @@
 import geopandas as gp
 import pandas as pd
-import rasterio
-from rasterio.features import rasterize
 
 from compactness_scores import all_measures
 from rdata import df_from_rdata
@@ -40,7 +38,7 @@ def load_districts(d: pd.DataFrame) -> gp.GeoDataFrame:
     for chamber, path in [
         ["L", "data/districts2010/US_stleg_lo_2010.shp"],
         ["U", "data/districts2010/US_stleg_up_2010.shp"],
-        ["C", "data/districts2010/US_cd111th_2010.shp"],
+        # ["C", "data/districts2010/US_cd111th_2010.shp"],
     ]:
         districts: gp.GeoDataFrame = gp.read_file(path)
         id_map.update(_id_geometry_map(districts, chamber))

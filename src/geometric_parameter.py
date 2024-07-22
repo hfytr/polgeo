@@ -48,8 +48,8 @@ def train_model():
     )
     model.compile(
         optimizer=keras.optimizers.SGD(learning_rate=lr_schedule),
-        loss=keras.losses.MeanSquaredError(),
-        metrics=[keras.metrics.MeanSquaredError()],
+        loss=keras.losses.MeanAbsolutePercentageError(),
+        metrics=[keras.metrics.MeanAbsolutePercentageError()],
     )
     print(model.summary())
     batch_size = 8
@@ -81,7 +81,7 @@ val_loss = list(train_model())[-1]
 sys.stdout = sys.__stdout__
 print(val_loss)
 while val_loss > 0.06:
-    sys.stdout = open(os.devnull, "w")
+    # sys.stdout = open(os.devnull, "w")
     val_loss = train_model()[-1]
-    sys.stdout = sys.__stdout__
+    # sys.stdout = sys.__stdout__
     print(val_loss)
