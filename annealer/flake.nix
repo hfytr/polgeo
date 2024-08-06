@@ -1,7 +1,4 @@
-# From https://github.com/litchipi/nix-build-templates/blob/6e4961dc56a9bbfa3acf316d81861f5bd1ea37ca/rust/maturin.nix
-# See also https://discourse.nixos.org/t/pyo3-maturin-python-native-dependency-management-vs-nixpkgs/21739/2
 {
-  # Build Pyo3 package
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
     flake-utils.url = "github:numtide/flake-utils";
@@ -15,19 +12,25 @@
     };
   };
 
-  outputs = inputs:
-    inputs.flake-utils.lib.eachDefaultSystem (system:
+  outputs = { self, nixpkgs, rust-overlay, flake-utils, crane, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import inputs.nixpkgs {
-          inherit system;
-          overlays = [ inputs.rust-overlay.overlays.default ];
+        overlays = [ (import rust-overlay) ];
+        pkgs = import nixpkgs {
+          inherit system overlays;
         };
+        # rustpkg = pkgs.rust-bin.stable.latest.default.override {
+        #   extensions = [ "rust-src" "rust-analyzer" "rustfmt" ];
+        #   targets = [ "arm-unknown-linux-gnueabihf" ];
+        # };
+        rustpkg = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
+          extensions = [ "rust-src" "rust-analyzer" "rustfmt" ];
+          targets = [ "arm-unknown-linux-gnueabihf" ];
+        });
         lib = pkgs.lib;
 
-        # Get a custom rust toolchain
-        customRustToolchain = pkgs.rust-bin.stable."1.70.0".default;
         craneLib =
-          (inputs.crane.mkLib pkgs).overrideToolchain customRustToolchain;
+          (crane.mkLib pkgs).overrideToolchain rustpkg;
 
         projectName =
           (craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; }).pname;
@@ -67,11 +70,13 @@
           pythonEnv = pythonVersion.withPackages
             (ps: [ (lib.pythonPackage ps) ] ++ (with ps; [
               pandas
+              networkx
               black
               isort
               tensorflow
               keras
               geopandas
+              shapely
               # gurobipy
               matplotlib
               ipython
@@ -91,19 +96,34 @@
             };
         };
 
-        devShells = rec {
-          default = pkgs.mkShell {
-            name = "dev-shell";
-            src = ./.;
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-              rust-analyzer
-              maturin
-              packages.pythonEnv
-              pyright
-              # gurobi
-            ];
-          };
+        devShells.default = pkgs.mkShell rec {
+          name = "python-dev";
+          src = ./.;
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+            maturin
+            packages.pythonEnv
+            pyright
+            # gurobi
+          ];
+        };
+
+        RUST_BACKTRACE = 1;
+        devShells.rust = pkgs.mkShell rec {
+          name = "rust-dev";
+          src = ./.;
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+            maturin
+            packages.pythonEnv
+            pyright
+            # gurobi
+          ];
+          buildInputs = with pkgs; [
+            openssl
+            pkg-config
+            rustpkg
+          ];
         };
 
         apps = rec {

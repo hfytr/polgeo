@@ -28,6 +28,12 @@ wherein $\epsilon \in (0.01, 1)$ is a given tolerance fraction.
 
 \section{Objective}
 We trained several models to predict "compactness" of political districts (\href{https://github.com/aaronrkaufman/compactness}{Data Link}). The dataset consisted of (district, rank) pairs. Rank in the dataset was decided by 6 groups of individuals ranking sets of 100 districts from 1 - 100. These individuals were judges, and public officials responsible for redistricting. Districts in the dataset were chosen from Congressional districts, State Congress Upper Chamber districts, and State Congress Lower Chamber districts.
+
+\subsection{Raster}
+In this model, we created a rasterizer which for a given district $D$, height $h$, width $w$, and sampling size $s$, produces a matrix $A\in R_{(h, w)}$ where $A$ is found by the following: Find the minimum bounding rectangle $R$ of $D$, which has width $w_R$, and height $h_R$. Subdivide $R$ into uniform rectangular cells. This grid should have dimension (in cells) of $h\times w$. For the cell at row $i\in[0, h)$, and column $j\in[0, w)$, the bottom left point is located at $P_{bl}=(i\frac{w_R}{w}, j\frac{h_R}{h})$, and the top left corner is located at $P_{tr}=((i+1)\frac{w_R}{w}, (j+1)\frac{h_R}{h})$. Sample $s$ random points $(x_i, y_i)$ where $x_i\in [P_{bl, x}, P_{tr, x}], y_i\in [P_{bl, y}, P_{tr, y}]$. Then $A_{i, j}$ is the fraction of these points which fall in the district.
+
+When creating our districting scheme, we set $w=30, h=30, s=100$. Using this data, we trained a convolutional neural network (CNN) with 4 layers, and the sigmoid activation on all layers. With this we were unable to achieve relative error below 20 even on training data. We also tried a support vector regressor (SVR) with even poorer results.
+
 \subsection{Geometric Scores}
 In this model, we created a neural network with the following inputs: consider a district $D$ which is an arbitrary 2-dimensional shape with perimeter $P$, and area $A$. We used the following functions of $D$ as inputs to a neural network
 \begin{itemize}
@@ -37,16 +43,7 @@ In this model, we created a neural network with the following inputs: consider a
 \item Polsby-Popper: Find the circle $C$ with perimeter $P$, and let its area be $A_C$. The Polsby-Popper metric is defined by $f(A_C, A) = A / A_C$. This metric ranges from 0 (worst) to 1 (ideal).
 \end{itemize}
 
-\subsection{Raster}
-In this model, we created a rasterizer which for a given district $D$, height $h$, width $w$, and sampling size $s$, produces a matrix $A\in R_{(h, w)}$ where $A$ is found by the following: Find the minimum bounding rectangle $R$ of $D$, which has width $w_R$, and height $h_R$. Subdivide $R$ into uniform rectangular cells. This grid should have dimension (in cells) of $h\times w$. For the cell at row $i\in[0, h)$, and column $j\in[0, w)$, the bottom left point is located at $P_{bl}=(i\frac{w_R}{w}, j\frac{h_R}{h})$, and the top left corner is located at $P_{tr}=((i+1)\frac{w_R}{w}, (j+1)\frac{h_R}{h})$. Sample $s$ random points $(x_i, y_i)$ where $x_i\in [P_{bl, x}, P_{tr, x}], y_i\in [P_{bl, y}, P_{tr, y}]$. Then $A_{i, j}$ is the fraction of these points which fall in the district.
-
-When creating our districting scheme, we set $w=30, h=30, s=100$.
-
-From this data, we calculated 2 sets of input variables: 1) We overlaid a 30x30 raster over each district, and then calculated the share of each pixel occupied by the district by sampling 100 points in the pixel. 2) We calculated the metrics of area, perimeter, convex hull area, Reock score, maximum of length / width ratio and width / length ratio, and Polsby Popper score.
-
-Using dataset 1 (rasterized data), we trained a convolutional neural network (CNN) with 4 layers, and the sigmoid activation on all layers. With this we were still unable to achieve relative error below 20 even on training data. We also tried a support vector regressor (SVR) with even poorer results.
-
-Using dataset 2 (geometric scores), we trained a multi-layer perceptron (MLP), with 7 layers, and the sigmoid activation function on all layers. This model performed similarly poorly, with a relative error of 25\% even on training data. As with the raster data, we tried to use an SVR, but as with the raster, we achieved poorer results than the neural network.
+Using this data, we trained a multi-layer perceptron (MLP), with 7 layers, and the sigmoid activation function on all layers. This model performed similarly poorly, with a relative error of 25\% even on training data. As with the raster data, we tried to use an SVR, but as with the raster, we achieved poorer results than the neural network.
 
 \section{Optimiser}
 I am using a dual approach, alternating between a simulated annealing solver, and a mixed integer linear programming solver (MIP). The solver will run the annealer to reach a desirable solution which may not be feasible. Following this, the MIP will find the nearest solution which is feasible, ignoring the objective value. The hope is that this solution will have an objective similar to the solution found by the annealer, and this process can be repeated until the objective value of the solution plateaus. The simulated annealer will run with relaxed population constraints, aiming to optimise the output of a blackbox model (either the raster model, or the geometric scores model).
@@ -56,16 +53,30 @@ The simulated annealer takes the following as input:
 \begin{itemize}
     \item An unweighted, undirected graph $G$ with $N$ nodes, represented by a sequence of sets, where $i\in[0, N)$ is the (arbitrary) index of a node, and $G_i$ is the set of the indices of node $i$'s neighbors. Each each node in the graph is associated with its own geographic area (counties, census tracts, etc.). Nodes corresponding areas do not overlap, and all combined nodes represent the state which is being districted.
     \item A vector $P$ of the populations of each node. $P$'s elements should be consistent with $G$.
-    \item The districting scheme $S_0$ from which to start the search. Districting schemes are simply represented as an (arbitrary) district id number for each node. Again, $S_0$ follows the indexing scheme of $G$.
-    \item An objective function $o$, which takes a districting scheme (such as $S_0$), and returns $x, x\in\mathbb{R}$, where a higher $x$ value is desirable.
+    \item A districting scheme $S_0$, consisting of $D$ districts, from which to start the search. Districting schemes are simply represented as an (arbitrary) district id number $d, d\in[0..D]$ for each node. Again, $S_0$ follows the indexing scheme of $G$.
+    \item An objective function $o$, which takes a districting scheme (such as $S_0$), and returns $x, x\in\mathbb{R}$, where a lower $x$ value is desirable.
+    % fill in suggested $\beta$ values
+    \item A constant $\beta, \beta\in[0, 1], \beta\in\mathbb{R}$ which represents the strictness with which population balance should be upheld. It is hard for the annealer to satisfy values of $\beta$ - this is the reason for the dual approach - so $\beta$ should at least below $0.6$
 \end{itemize}
 Let $S$ denote the current districting scheme found by the annealer. A single iteration of the simulated annealer involves:
 \begin{enumerate}
     \item The set of border nodes $B=\{x\in[0, N): |\{y\in G_x: S_y\}|\geq2\}$ is calculated for the current state. This is simply the set of all nodes which are adjacent to multiple districts.
-    \item Define the set $N$ (representing the next possible states in the search) such that $\forall n, \forall d, n \in B, d\in \{S_x: x\in G_n\land S_x\neq S_n\}, (n, d)$ is an element of $O$.
-    \item Let the function $u(n, d, S)=$ the state resulting from reassigninig node $n$ to district $d$, in state $S$. Define the set $O = {x: (n, d)\in N, x=o(u(n, d, S))}$
+    \item Let the function $u(n, d, S)=$ the state resulting from reassigninig node $n$ to district $d$, in state $S$. Define the set $N = \{u(n, d, S): n \in B, d\in \{S_x: x\in G_n\land S_x\neq S_n\}\}$.
+    \item Define the set $O = \{o(S_n): S_n\in N)\}$
+    \item Recall that we must uphold both population balance, and contiguity. Thus, for a possible child state $S^n$, we should remove it from consideration if it does not meet these constraints: Let $p(d) = \sum_{x\in \{P_i: i\in[0..N)\land S_i=d\}\}}x$, then min$_{d\in[0..D)}p(d)\geq \beta$max$_{d\in[0..D)}p(d)$.
+    \item Calculate the probability's for each possible update according to the temperature softmax function: $P=\{(o): a(o)\in O\}$. Based on these probabilities, randomly select one of the states, and update the $S$.
 \end{enumerate}
 From $S_0$, the border nodes are calculated.
+
+\subsection{MLP}
+The MLP part of the optimiser takes the same parameters as the simulated annealer. However the value of $\beta$ should be much stricter in this case (at least 0.95), as satisfying a stricter $\beta$ is the entire goal of the MLP. Then, an MLP model is created as follows:
+\begin{itemize}
+    \item $DN$ binary decision variables, with each $x_{i,j}$ indicating whether node $i$ is currently assigned to district $j$. Of course, each node can belong to only one district: $\forall n, n\in\mathbb{Z}, n\in[0..N)\sum_{i=0}^dx_{n,i}=1$.
+    \item Decision variables $p_{max}, p_{min}$, representing the population of the most, and least populous districts respectively. They are constrained as $\forall d, d\in[0..D), d\in\mathbb{Z}, p_{max}\geq p(d), p_{min}\leq p(d)$. (recall the population function defined earlier).
+    \item A constant objective, as the goal of the MLP is to find the solution closest to the input which is still feasible.
+\end{itemize}
+
+Districts must also be contiguous, and in our current model, this is not accounted for.
 
 \section{Languages / Libraries}
 The neural networks, and SVR's were trained using the python packages tensorflow and keras, while both the rasterizer, and the simulated annealer were implemented in rust, with few dependencies.

@@ -22,6 +22,7 @@ fn optimize_func(
     num_districts: usize,
     population: Vec<usize>,
     num_steps: usize,
+    pop_thresh: f32,
 ) -> PyResult<(f64, Vec<usize>)> {
     if adj.len() != precinct_in.len() {
         return PyResult::Err(PyErr::new::<PyException, _>(PyException::new_err(
@@ -46,25 +47,45 @@ fn optimize_func(
         )));
     }
     let temperature = |x: f64| {
-        objective_raw
+        temperature_raw
             .call1((x,))
             .unwrap()
             .extract()
             .expect("temperature returned wrong type, must retur f64")
     };
-    let mut annealer = anneal::Annealer::new(
+    let mut annealer = anneal::Annealer::from_starting_state(
         precinct_in,
         adj,
         objective,
         temperature,
         num_districts,
         population,
+        pop_thresh,
     );
     annealer.anneal(num_steps)
 }
 
+#[pyfunction]
+fn init_precinct(
+    adj: Vec<Vec<usize>>,
+    population: Vec<usize>,
+    num_districts: usize,
+    pop_thresh: f32,
+    threads: u8,
+) -> PyResult<Vec<usize>> {
+    Ok(anneal::init_precinct_with_threads(
+        adj,
+        population,
+        num_districts,
+        pop_thresh,
+        threads,
+    ))
+}
+
 #[pymodule]
 fn annealer(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    pyo3_log::init();
     m.add_function(wrap_pyfunction!(optimize_func, m)?)?;
+    m.add_function(wrap_pyfunction!(init_precinct, m)?)?;
     Ok(())
 }
