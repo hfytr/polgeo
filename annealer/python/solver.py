@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -89,11 +90,96 @@ def shp_from_assign(gdf, col):
     plt.show()
 
 
-def objective(x, ind_to_geoid, tracts):
-    geoid_list = [ind_to_geoid[i] for i, included in enumerate(x) if included]
-    selected_tracts = tracts[tracts.index.isin(geoid_list)]
-    combined_geometry = unary_union(selected_tracts.geometry)
-    return combined_geometry.area / combined_geometry.convex_hull.area
+def objective(
+    x: list[list[bool]], ind_to_geoid: dict[int, int], tracts: [gpd.GeoDataFrame]
+):
+    result = 0
+    for district in x:
+        dist_start = time.perf_counter() * 1000
+        geoid_list = [
+            ind_to_geoid[i] for i, included in enumerate(district) if included
+        ]
+        mk_geoids = time.perf_counter() * 1000
+        selected_tracts = tracts[tracts.index.isin(geoid_list)]
+        select = time.perf_counter() * 1000
+        combined_geometry = unary_union(selected_tracts.geometry)
+        combine = time.perf_counter() * 1000
+        result += combined_geometry.area / combined_geometry.convex_hull.area
+        divide = time.perf_counter() * 1000
+        print(
+            f"total: {divide - dist_start} mk_geoids: {mk_geoids - dist_start}, select: {select - mk_geoids}, combine: {combine - select}, divide: {divide - combine}, "
+        )
+    return result
+
+
+def solve():
+    FORMAT = "%(levelname)s %(name)s %(asctime)-15s %(filename)s:%(lineno)d %(message)s"
+    logging.basicConfig(format=FORMAT)
+    logging.getLogger().setLevel(logging.INFO)
+
+    tracts = get_data(
+        "../data/tl/tl_2023_25_tract.shp", "../data/tl/DECENNIALPL2020.P3-Data.csv"
+    )
+    adj = get_adj(tracts, "GEOID")
+    tracts.set_index("GEOID", inplace=True, drop=True)
+    ind_to_geoid = {}
+    geoid_to_ind = {}
+    adj_list = []
+    population_list = []
+    for i, key in enumerate(tracts.index):
+        ind_to_geoid.update({i: key})
+        geoid_to_ind.update({key: i})
+    adj_list = [None for _ in range(len(ind_to_geoid))]
+    for key, value in adj.items():
+        adj_list[geoid_to_ind.get(key)] = [geoid_to_ind.get(v) for v in value]
+        population_list.append(tracts.loc[key]["POP"])
+
+    test_adj = {
+        ind_to_geoid.get(i): [ind_to_geoid.get(v) for v in val]
+        for i, val in enumerate(adj_list)
+    }
+    graph_adj(tracts, test_adj)
+
+    NUM_DISTRICTS = 9
+    T0 = 0.5
+    POP_THRESH = 0.6
+    NUM_THREADS = 8
+    shp_path = "../data/initial_assign.shp"
+    if not os.path.isfile(shp_path):
+        print(tracts.shape)
+        initial_assignment = annealer.init_precinct(
+            adj_list, population_list, NUM_DISTRICTS, POP_THRESH, NUM_THREADS
+        )
+        tracts["INIT_DISTS"] = tracts.index.map(
+            {
+                ind_to_geoid.get(node): district
+                for node, district in enumerate(initial_assignment)
+            }
+        )
+        print(tracts.columns)
+        tracts.to_file(shp_path)
+        shp_from_assign(tracts, "INIT_DISTS")
+    else:
+        tracts = gpd.read_file(shp_path)
+        tracts.set_index("GEOID", inplace=True, drop=False)
+        initial_assignment = [
+            tracts.loc[ind_to_geoid.get(i)]["INIT_DISTS"]
+            for i in range(len(population_list))
+        ]
+        # shp_from_assign(tracts, "INIT_DISTS")
+        print(tracts.columns)
+        print(tracts["INIT_DISTS"])
+    annealer.optimize_func(
+        objective_raw=lambda x: objective(x, ind_to_geoid, tracts),
+        temperature_raw=lambda x: T0 * x,
+        precinct_in=initial_assignment,
+        adj=adj_list,
+        num_districts=NUM_DISTRICTS,
+        population=population_list,
+        num_steps=100,
+        pop_thresh=POP_THRESH,
+    )
+    logging.shutdown()
 
 
 if __name__ == "__main__":
@@ -150,7 +236,7 @@ if __name__ == "__main__":
             tracts.loc[ind_to_geoid.get(i)]["INIT_DISTS"]
             for i in range(len(population_list))
         ]
-        shp_from_assign(tracts, "INIT_DISTS")
+        # shp_from_assign(tracts, "INIT_DISTS")
         print(tracts.columns)
         print(tracts["INIT_DISTS"])
     annealer.optimize_func(

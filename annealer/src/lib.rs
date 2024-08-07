@@ -23,6 +23,7 @@ fn optimize_func(
     population: Vec<usize>,
     num_steps: usize,
     pop_thresh: f32,
+    threads: u8,
 ) -> PyResult<(f64, Vec<usize>)> {
     if adj.len() != precinct_in.len() {
         return PyResult::Err(PyErr::new::<PyException, _>(PyException::new_err(
@@ -62,7 +63,7 @@ fn optimize_func(
         population,
         pop_thresh,
     );
-    annealer.anneal(num_steps)
+    annealer.anneal(num_steps, threads)
 }
 
 #[pyfunction]
