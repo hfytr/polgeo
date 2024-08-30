@@ -146,15 +146,24 @@ impl<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f
 
             let rand = rand_state.next() as f64 / MAX;
             let mut accumulated_probability = 0.0;
-            for (node, district, score, probability) in probabilities {
+            for (node, district, score, probability) in probabilities.clone() {
+                // dbg!((score, probability));
                 accumulated_probability += probability;
                 if accumulated_probability > rand {
-                    println!("{}", score);
+                    println!("{}", score / temp);
                     self.hist.push((node, district, score));
                     self.update_state(node, district);
                     break;
                 }
             }
+            println!(
+                "chose: {}\n{:?}",
+                self.hist.last().unwrap().2,
+                probabilities
+                    .map(|(_, _, score, probabilty)| (score, probabilty))
+                    .sorted_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+                    .collect_vec()
+            )
         }
         (self.cur_state.0, self.cur_state.1, self.hist)
     }
@@ -217,6 +226,7 @@ impl<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f
         if *populations.iter().max().unwrap() as f32 / *populations.iter().min().unwrap() as f32
             > 1.0 + self.pop_thresh
         {
+            dbg!("pop infease");
             return false;
         }
         // whether we have flood filled a given district

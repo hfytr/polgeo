@@ -48,8 +48,8 @@ fn init_precinct(
 ) -> Option<Vec<usize>> {
     let total_pop = population.iter().sum::<usize>();
     let num_nodes = population.len();
-    let max_pop = total_pop as f32 / (num_districts as f32 - 1.0 + pop_thresh);
-    let min_pop = pop_thresh * max_pop;
+    let max_pop = total_pop as f32 / (1.0 + (num_districts as f32 - 1.0) / (1.0 + pop_thresh));
+    let min_pop = max_pop / (1.0 + pop_thresh);
     let mut rand_state = UniformDist::new([0xfda52833df686ae6, 0x7919f78c90a9362c]);
     let mut result = Vec::new();
     let mut sol_feasible = false;
@@ -117,6 +117,11 @@ fn init_precinct(
             }
             for district in 0..num_districts {
                 frontier[district].1.remove(&added_node);
+                if frontier[district].1.len() == 0
+                    && !(min_pop..max_pop).contains(&(district_pops[district] as f32))
+                {
+                    sol_feasible = false;
+                }
             }
 
             if stop_token.load(Ordering::Relaxed) {

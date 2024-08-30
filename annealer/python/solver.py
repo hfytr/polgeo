@@ -10,7 +10,7 @@ from matplotlib.colors import to_rgba
 from shapely import unary_union
 from shapely.geometry import MultiPolygon, Polygon
 
-import annealer
+# import annealer
 
 
 def get_adj(gdf, unique_col):
@@ -169,84 +169,26 @@ def solve():
         # shp_from_assign(tracts, "INIT_DISTS")
         print(tracts.columns)
         print(tracts["INIT_DISTS"])
-    annealer.optimize_func(
-        objective_raw=lambda x: objective(x, ind_to_geoid, tracts),
-        temperature_raw=lambda x: T0 * x,
-        precinct_in=initial_assignment,
-        adj=adj_list,
-        num_districts=NUM_DISTRICTS,
-        population=population_list,
-        num_steps=100,
-        pop_thresh=POP_THRESH,
-    )
+    # annealer.optimize_func(
+    #     objective_raw=lambda x: objective(x, ind_to_geoid, tracts),
+    #     temperature_raw=lambda x: T0 * x,
+    #     precinct_in=initial_assignment,
+    #     adj=adj_list,
+    #     num_districts=NUM_DISTRICTS,
+    #     population=population_list,
+    #     num_steps=100,
+    #     pop_thresh=POP_THRESH,
+    # )
     logging.shutdown()
 
 
 if __name__ == "__main__":
-    FORMAT = "%(levelname)s %(name)s %(asctime)-15s %(filename)s:%(lineno)d %(message)s"
-    logging.basicConfig(format=FORMAT)
-    logging.getLogger().setLevel(logging.INFO)
-
-    tracts = get_data(
-        "../data/tl/tl_2023_25_tract.shp", "../data/tl/DECENNIALPL2020.P3-Data.csv"
-    )
-    adj = get_adj(tracts, "GEOID")
-    tracts.set_index("GEOID", inplace=True, drop=True)
-    ind_to_geoid = {}
-    geoid_to_ind = {}
-    adj_list = []
-    population_list = []
-    for i, key in enumerate(tracts.index):
-        ind_to_geoid.update({i: key})
-        geoid_to_ind.update({key: i})
-    adj_list = [None for _ in range(len(ind_to_geoid))]
-    for key, value in adj.items():
-        adj_list[geoid_to_ind.get(key)] = [geoid_to_ind.get(v) for v in value]
-        population_list.append(tracts.loc[key]["POP"])
-
-    test_adj = {
-        ind_to_geoid.get(i): [ind_to_geoid.get(v) for v in val]
-        for i, val in enumerate(adj_list)
-    }
-    graph_adj(tracts, test_adj)
-
-    NUM_DISTRICTS = 9
-    T0 = 0.5
-    POP_THRESH = 0.6
-    NUM_THREADS = 8
-    shp_path = "../data/initial_assign.shp"
-    if not os.path.isfile(shp_path):
-        print(tracts.shape)
-        initial_assignment = annealer.init_precinct(
-            adj_list, population_list, NUM_DISTRICTS, POP_THRESH, NUM_THREADS
-        )
-        tracts["INIT_DISTS"] = tracts.index.map(
-            {
-                ind_to_geoid.get(node): district
-                for node, district in enumerate(initial_assignment)
-            }
-        )
-        print(tracts.columns)
-        tracts.to_file(shp_path)
-        shp_from_assign(tracts, "INIT_DISTS")
-    else:
-        tracts = gpd.read_file(shp_path)
-        tracts.set_index("GEOID", inplace=True, drop=False)
-        initial_assignment = [
-            tracts.loc[ind_to_geoid.get(i)]["INIT_DISTS"]
-            for i in range(len(population_list))
-        ]
-        # shp_from_assign(tracts, "INIT_DISTS")
-        print(tracts.columns)
-        print(tracts["INIT_DISTS"])
-    annealer.optimize_func(
-        objective_raw=lambda x: objective(x, ind_to_geoid, tracts),
-        temperature_raw=lambda x: T0 * x,
-        precinct_in=initial_assignment,
-        adj=adj_list,
-        num_districts=NUM_DISTRICTS,
-        population=population_list,
-        num_steps=100,
-        pop_thresh=POP_THRESH,
-    )
-    logging.shutdown()
+    tiles = gpd.read_file("../../data/tiles.shp")
+    buffered = gpd.read_file("../../data/buffered.shp")
+    unbuffered = gpd.read_file("../../data/unbuffered.shp")
+    fig, ax = plt.subplots(figsize=(10, 10))
+    tiles.boundary.plot(ax=ax, linewidth=1, edgecolor="black", label="tile")
+    # buffered.plot(ax=ax, color="blue", alpha=0.5, edgecolor="k", label="GDF1")
+    # unbuffered.plot(ax=ax, color="blue", alpha=0.5, edgecolor="k", label="GDF1")
+    ax.legend()
+    plt.show()
