@@ -1,10 +1,9 @@
 use crate::rand::{UniformDist, MAX};
 use itertools::Itertools;
 use std::fmt::Debug;
-use std::iter::zip;
 use std::thread;
 
-pub struct Annealer<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f64> {
+pub struct Annealer {
     adj: Vec<Vec<usize>>,
     cur_state: (f64, Vec<usize>),
     best: (f64, Vec<usize>),
@@ -14,13 +13,11 @@ pub struct Annealer<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync
     hist: Vec<(usize, usize, f64)>,
     pop_thresh: f32,
     num_nodes: usize,
-    objective: F,
-    temperature: G,
+    objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64>,
+    temperature: Box<dyn Send + Sync + Fn(f64) -> f64>,
 }
 
-impl<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f64> Debug
-    for Annealer<F, G>
-{
+impl Debug for Annealer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("adj: {:?}", self.adj))?;
         f.write_fmt(format_args!("cur_state: {:?}", self.cur_state))?;
@@ -32,7 +29,7 @@ impl<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f
     }
 }
 
-fn print_grid<T: Debug>(a: &Vec<T>, width: usize) {
+fn _print_grid<T: Debug>(a: &Vec<T>, width: usize) {
     println!("");
     for (i, x) in a.iter().enumerate() {
         print!("{:?} ", x);
@@ -42,16 +39,16 @@ fn print_grid<T: Debug>(a: &Vec<T>, width: usize) {
     }
 }
 
-impl<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f64> Annealer<F, G> {
+impl Annealer {
     pub fn from_starting_state(
         starting_assignment: Vec<usize>,
         adj: Vec<Vec<usize>>,
         num_districts: usize,
         population: Vec<usize>,
         pop_thresh: f32,
-        objective: F,
-        temperature: G,
-    ) -> Annealer<F, G> {
+        objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64>,
+        temperature: Box<dyn Send + Sync + Fn(f64) -> f64>,
+    ) -> Annealer {
         let mut annealer = Annealer {
             adj,
             num_districts,
@@ -75,6 +72,11 @@ impl<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f
         annealer
     }
 
+    pub fn set_state(&mut self, new_state: Vec<usize>) {
+        self.cur_state.1 = new_state;
+        self.cur_state.0 = (self.objective)(&self.cur_state.1);
+    }
+
     fn get_border_nodes(&self) -> Vec<usize> {
         (0..self.num_nodes)
             .map(|x| {
@@ -86,7 +88,7 @@ impl<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f
     }
 
     pub fn anneal(
-        mut self,
+        &mut self,
         num_steps: usize,
         num_threads: u8,
     ) -> (f64, Vec<usize>, Vec<(usize, usize, f64)>) {
@@ -124,7 +126,9 @@ impl<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f
             thread::scope(|s| {
                 let handles = chunks
                     .into_iter()
-                    .map(|chunk| s.spawn(|| immut_self.get_scores(chunk)))
+                    .map(|chunk| {
+                        s.spawn(|| Self::get_scores(&self.cur_state.1, &self.objective, chunk))
+                    })
                     .collect_vec();
 
                 scores = handles
@@ -133,16 +137,28 @@ impl<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f
                     .collect_vec();
             });
 
+            dbg!(&scores);
+
             let adjusted = scores
                 .iter()
                 .flatten()
-                .map(|(_, _, x)| (x / temp).exp())
+                .map(|(_, _, x)| {
+                    dbg!(x);
+                    (x / temp).exp()
+                })
                 .collect_vec();
+            dbg!(&temp);
+
+            dbg!(&adjusted);
 
             let sum: f64 = adjusted.iter().fold(0.0, |acc, elem| acc + elem);
 
-            let probabilities = zip(scores.into_iter().flatten(), adjusted.into_iter())
-                .map(|((node, district, score), adjusted)| (node, district, score, adjusted / sum));
+            let probabilities = scores.into_iter().flatten().zip(adjusted.into_iter()).map(
+                |((node, district, score), adjusted)| {
+                    // dbg!((node, district, score));
+                    (node, district, score, adjusted / sum)
+                },
+            );
 
             let rand = rand_state.next() as f64 / MAX;
             let mut accumulated_probability = 0.0;
@@ -165,20 +181,27 @@ impl<F: Send + Sync + Fn(&[usize]) -> f64 + Clone, G: Send + Sync + Fn(f64) -> f
                     .collect_vec()
             )
         }
-        (self.cur_state.0, self.cur_state.1, self.hist)
+
+        (
+            self.cur_state.0.clone(),
+            self.cur_state.1.clone(),
+            self.hist.clone(),
+        )
     }
 
-    fn get_scores(&self, chunk: Vec<(usize, usize)>) -> Vec<(usize, usize, f64)> {
+    fn get_scores(
+        cur_assignment: &Vec<usize>,
+        objective: &Box<dyn Send + Sync + Fn(&[usize]) -> f64>,
+        chunk: Vec<(usize, usize)>,
+    ) -> Vec<(usize, usize, f64)> {
         chunk
             .into_iter()
             .map(|(node, district_num)| {
                 (
                     node,
                     district_num,
-                    (self.objective)(
-                        &self
-                            .cur_state
-                            .1
+                    objective(
+                        &cur_assignment
                             .iter()
                             .enumerate()
                             .map(|(i, x)| if i == node { district_num } else { *x })
