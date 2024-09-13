@@ -1,16 +1,19 @@
 import logging
 import os
+import re
 import time
 
 import geopandas as gpd
+import gurobipy as gp
 import matplotlib.pyplot as plt
 import networkx as nx
 import pandas as pd
+from gurobipy import GRB, LinExpr, quicksum
 from matplotlib.colors import to_rgba
 from shapely import unary_union
 from shapely.geometry import MultiPolygon, Polygon
 
-# import annealer
+from annealer import AnnealerService, init_precinct
 
 
 def get_adj(gdf, unique_col):
@@ -141,7 +144,6 @@ def solve():
     graph_adj(tracts, test_adj)
 
     NUM_DISTRICTS = 9
-    T0 = 0.5
     POP_THRESH = 0.6
     NUM_THREADS = 8
     shp_path = "../data/initial_assign.shp"
@@ -166,29 +168,222 @@ def solve():
             tracts.loc[ind_to_geoid.get(i)]["INIT_DISTS"]
             for i in range(len(population_list))
         ]
-        # shp_from_assign(tracts, "INIT_DISTS")
+        shp_from_assign(tracts, "INIT_DISTS")
         print(tracts.columns)
         print(tracts["INIT_DISTS"])
-    # annealer.optimize_func(
-    #     objective_raw=lambda x: objective(x, ind_to_geoid, tracts),
-    #     temperature_raw=lambda x: T0 * x,
-    #     precinct_in=initial_assignment,
-    #     adj=adj_list,
-    #     num_districts=NUM_DISTRICTS,
-    #     population=population_list,
-    #     num_steps=100,
-    #     pop_thresh=POP_THRESH,
-    # )
-    logging.shutdown()
+
+
+ANNEAL_POP_THRESH = 0.50
+T0 = 0.1
+INIT_POP_THRESH = 0.01
+POP_THRESH = 0.95
+NUM_THREADS = 8
+
+
+def make_lp(
+    assignment_raw: list[int],
+    adj: list[list[int]],
+    populations: list[int],
+    k: int,
+    width: int,
+    height: int,
+    pop_thresh: float,
+):
+    m = gp.Model("flow")
+
+    n = len(adj)
+    x = m.addVars(k, n, vtype=GRB.BINARY, name="x")
+    w = m.addVars(k, n, vtype=GRB.BINARY, name="w")
+    y = m.addVars(
+        [
+            (district, node, int(child))
+            for district in range(k)
+            for node in range(n)
+            for child in adj[node]
+        ],
+        lb=0.0,
+        vtype=GRB.CONTINUOUS,
+        name="y",
+    )
+    district_pops = m.addVars(k, vtype=GRB.INTEGER, name="p", lb=0.0)
+    highest_pop = m.addVar(lb=0.0, vtype=GRB.INTEGER, name="p_max")
+    lowest_pop = m.addVar(lb=0.0, vtype=GRB.INTEGER, name="p_min")
+
+    district_pop_constr = m.addConstrs(
+        (
+            quicksum(x[i, j] * populations[j] for j in range(n)) == district_pops[i]
+            for i in range(k)
+        ),
+        name="set district populations",
+    )
+
+    highest_pop_constr = m.addConstrs(
+        (highest_pop >= district_pops[i] for i in range(k)),
+        name="set highest pop district",
+    )
+
+    lowest_pop_constr = m.addConstrs(
+        (lowest_pop <= district_pops[i] for i in range(k)),
+        name="set lowest pop district",
+    )
+
+    population_balance = m.addConstr(
+        (highest_pop * pop_thresh <= lowest_pop), name="population balance"
+    )
+
+    one_district_per_node = m.addConstrs(
+        (quicksum(x[i, j] for i in range(k)) == 1 for j in range(n)),
+        name="one district per node",
+    )
+
+    sink_in_district = m.addConstrs(
+        (w[i, j] <= x[i, j] for i in range(k) for j in range(n)),
+        name="sink in same district",
+    )
+
+    one_sink_per_district = m.addConstrs(
+        (quicksum(w[i, j] for j in range(n)) == 1 for i in range(k)),
+        name="one sink per district",
+    )
+
+    net_flow = m.addConstrs(
+        (
+            (
+                quicksum(y[i, j, k] for k in adj[j])
+                - quicksum(y[i, k, j] for k in adj[j])
+                >= x[i, j] - (n - k) * w[i, j]
+            )
+            for i in range(k)
+            for j in range(n)
+        ),
+        name="net flow",
+    )
+
+    ubound_outflow = m.addConstrs(
+        (
+            y[i, j, k] <= x[i, j] * (n - k)
+            for i in range(k)
+            for j in range(n)
+            for k in adj[j]
+        ),
+        name="upperbound outflow of node",
+    )
+
+    ubound_inflow = m.addConstrs(
+        (
+            y[i, j, k] <= x[i, k] * (n - k)
+            for i in range(k)
+            for j in range(n)
+            for k in adj[j]
+        ),
+        name="upperbound inflow of node",
+    )
+
+    assignment = [
+        [1 if assignment_raw[j] == i else 0 for j in range(n)] for i in range(k)
+    ]
+    m.setObjective(
+        quicksum((x[i, j] - assignment[i][j]) ** 2 for i in range(k) for j in range(n)),
+        GRB.MINIMIZE,
+    )
+    m.optimize()
+    fit = m.ObjVal
+    x = {
+        x.getAttr("VarName"): x.getAttr("X")
+        for x in m.getVars()
+        if x.getAttr("VarName")[0] == "x"
+    }
+    grid = [["" for j in range(width)] for i in range(height)]
+    output_assignment = [k for _ in range(n)]
+    for key in x:
+        regex = re.match(r"x\[(\d+),(\d+)\]", key)
+        if regex:
+            district = int(regex.group(1))
+            index = int(regex.group(2))
+            if int(x[key]):
+                output_assignment[index] = district
+            row = index // width
+            col = index % width
+            if int(x[key]):
+                grid[row][col] = str(district)
+    return (output_assignment, fit)
+
+
+def test_grid(width, height, population, num_districts):
+    def make_cell(i):
+        row = i / width
+        col = i % height
+        return (
+            [
+                (col, row),
+                (col + 1.0, row),
+                (col + 1.0, row + 1.0),
+                (col, row + 1.0),
+            ],
+            [],
+        )
+
+    cells = list(map(make_cell, range(width * height)))
+
+    def cell_adj(i):
+        row = i // width
+        col = i % width
+        result = []
+        for offset in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            if i == 1:
+                print(offset)
+                print((row, col))
+                print(row + offset[0])
+                print(col + offset[1])
+            if 0 <= row + offset[0] < height and 0 <= col + offset[1] < width:
+                result.append((row + offset[0]) * width + (col + offset[1]))
+        return result
+
+    adj: list[list[int]] = list(map(cell_adj, range(width * height)))
+
+    assignment = init_precinct(
+        adj,
+        population,
+        num_districts,
+        ANNEAL_POP_THRESH,
+        NUM_THREADS,
+    )
+    annealer = AnnealerService(
+        assignment,
+        adj,
+        cells,
+        num_districts,
+        population,
+        ANNEAL_POP_THRESH,
+        T0,
+    )
+    hist: list[tuple[list[float], float]] = []
+    for i in range(20):
+        (_, assignment, anneal_cycle_hist) = annealer.anneal(
+            assignment, 10, NUM_THREADS
+        )
+        (assignment, fit) = make_lp(
+            assignment,
+            adj,
+            population,
+            num_districts,
+            width,
+            height,
+            POP_THRESH,
+        )
+        hist.append((anneal_cycle_hist, fit))
+
+    return (assignment, hist)
 
 
 if __name__ == "__main__":
-    tiles = gpd.read_file("../../data/tiles.shp")
-    buffered = gpd.read_file("../../data/buffered.shp")
-    unbuffered = gpd.read_file("../../data/unbuffered.shp")
-    fig, ax = plt.subplots(figsize=(10, 10))
-    tiles.boundary.plot(ax=ax, linewidth=1, edgecolor="black", label="tile")
+    assignment, hist = test_grid(4, 4, range(16), 2)
+    # tiles = gpd.read_file("../../data/tiles.shp")
+    # buffered = gpd.read_file("../../data/buffered.shp")
+    # unbuffered = gpd.read_file("../../data/unbuffered.shp")
+    # fig, ax = plt.subplots(figsize=(10, 10))
+    # tiles.boundary.plot(ax=ax, linewidth=1, edgecolor="black", label="tile")
     # buffered.plot(ax=ax, color="blue", alpha=0.5, edgecolor="k", label="GDF1")
     # unbuffered.plot(ax=ax, color="blue", alpha=0.5, edgecolor="k", label="GDF1")
-    ax.legend()
-    plt.show()
+    # ax.legend()
+    # plt.show()

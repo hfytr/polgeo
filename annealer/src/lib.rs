@@ -1,9 +1,9 @@
 pub mod adjacency;
 mod anneal;
-mod init_precinct;
+mod init;
 mod rand;
 pub use anneal::Annealer;
-pub use init_precinct::init_precinct_with_threads;
+pub use init::init_precinct_with_threads;
 
 use adjacency::CollectLineString;
 use itertools::Itertools;
@@ -13,8 +13,10 @@ use geo::{
     BooleanOps, LineString, MultiPolygon, Polygon,
 };
 use pyo3::{
-    exceptions::PyException, pyclass, pymethods, types::PyAnyMethods, Bound, FromPyObject, PyAny,
-    PyErr, PyResult,
+    exceptions::PyException,
+    pyclass, pyfunction, pymethods, pymodule,
+    types::{PyAnyMethods, PyModule},
+    wrap_pyfunction, Bound, FromPyObject, PyAny, PyErr, PyResult,
 };
 
 #[pyclass]
@@ -108,6 +110,24 @@ impl AnnealerService {
         self.annealer.set_state(starting_state);
         Ok(self.annealer.anneal(num_steps, num_threads))
     }
+}
+
+#[pyfunction]
+fn init_precinct(
+    adj: Vec<Vec<usize>>,
+    population: Vec<usize>,
+    num_districts: usize,
+    pop_thresh: f32,
+    num_threads: u8,
+) -> Vec<usize> {
+    init::init_precinct_with_threads(adj, population, num_districts, pop_thresh, num_threads)
+}
+
+#[pymodule]
+fn annealer(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<AnnealerService>()?;
+    m.add_function(wrap_pyfunction!(init_precinct, m)?)?;
+    Ok(())
 }
 
 #[cfg(test)]

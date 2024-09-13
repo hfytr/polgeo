@@ -75,6 +75,7 @@ impl Annealer {
     pub fn set_state(&mut self, new_state: Vec<usize>) {
         self.cur_state.1 = new_state;
         self.cur_state.0 = (self.objective)(&self.cur_state.1);
+        self.border_nodes = self.get_border_nodes();
     }
 
     fn get_border_nodes(&self) -> Vec<usize> {
@@ -115,6 +116,34 @@ impl Annealer {
                 .collect_vec();
 
             let num_feasible = feasible_moves.len();
+            if num_feasible == 0 {
+                dbg!(&step);
+                _print_grid(&self.cur_state.1, 4);
+                dbg!((0..self.num_nodes)
+                    .flat_map(|node| {
+                        self.adj[node]
+                            .iter()
+                            .filter_map(move |neighbor| {
+                                if immut_self.cur_state.1[*neighbor] == immut_self.cur_state.1[node]
+                                    || !immut_self
+                                        .feasible(Some((node, immut_self.cur_state.1[*neighbor])))
+                                {
+                                    dbg!("infeasible");
+                                    None
+                                } else {
+                                    dbg!("feasible");
+                                    Some((node, immut_self.cur_state.1[*neighbor]))
+                                }
+                            })
+                            .unique()
+                    })
+                    .collect_vec());
+                // return (
+                //     self.cur_state.0.clone(),
+                //     self.cur_state.1.clone(),
+                //     self.hist.clone(),
+                // );
+            }
             let chunks = feasible_moves
                 .into_iter()
                 .chunks((num_feasible + num_threads as usize - 1) / num_threads as usize)
@@ -137,49 +166,29 @@ impl Annealer {
                     .collect_vec();
             });
 
-            dbg!(&scores);
-
             let adjusted = scores
                 .iter()
                 .flatten()
-                .map(|(_, _, x)| {
-                    dbg!(x);
-                    (x / temp).exp()
-                })
+                .map(|(_, _, x)| (x / temp).exp())
                 .collect_vec();
-            dbg!(&temp);
-
-            dbg!(&adjusted);
 
             let sum: f64 = adjusted.iter().fold(0.0, |acc, elem| acc + elem);
 
-            let probabilities = scores.into_iter().flatten().zip(adjusted.into_iter()).map(
-                |((node, district, score), adjusted)| {
-                    // dbg!((node, district, score));
-                    (node, district, score, adjusted / sum)
-                },
-            );
+            let probabilities =
+                scores.into_iter().flatten().zip(adjusted.into_iter()).map(
+                    |((node, district, score), adjusted)| (node, district, score, adjusted / sum),
+                );
 
             let rand = rand_state.next() as f64 / MAX;
             let mut accumulated_probability = 0.0;
             for (node, district, score, probability) in probabilities.clone() {
-                // dbg!((score, probability));
                 accumulated_probability += probability;
                 if accumulated_probability > rand {
-                    println!("{}", score / temp);
                     self.hist.push((node, district, score));
                     self.update_state(node, district);
                     break;
                 }
             }
-            println!(
-                "chose: {}\n{:?}",
-                self.hist.last().unwrap().2,
-                probabilities
-                    .map(|(_, _, score, probabilty)| (score, probabilty))
-                    .sorted_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
-                    .collect_vec()
-            )
         }
 
         (
@@ -232,6 +241,7 @@ impl Annealer {
     }
 
     fn feasible(&self, changes: Option<(usize, usize)>) -> bool {
+        dbg!(&changes);
         let (changed_node, district) = changes.unwrap_or((0, self.cur_state.1[0]));
 
         let populations = self.population.iter().enumerate().fold(
@@ -249,7 +259,7 @@ impl Annealer {
         if *populations.iter().max().unwrap() as f32 / *populations.iter().min().unwrap() as f32
             > 1.0 + self.pop_thresh
         {
-            dbg!("pop infease");
+            dbg!("pop infeasible");
             return false;
         }
         // whether we have flood filled a given district

@@ -36,7 +36,7 @@
 
         pythonVersion = pkgs.python311;
         wheelTail =
-          "cp310-cp310-manylinux_2_34_x86_64"; # Change if pythonVersion changes
+          "cp311-cp311-manylinux_2_35_x86_64"; # Change if pythonVersion changes
         wheelName = "${projectName}-${projectVersion}-${wheelTail}.whl";
 
         crateCfg = {
@@ -73,7 +73,7 @@
               keras
               geopandas
               shapely
-              # gurobipy
+              gurobipy
               matplotlib
               ipython
             ]));
