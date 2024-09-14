@@ -100,7 +100,7 @@
             maturin
             packages.pythonEnv
             pyright
-            # gurobi
+            highs
           ];
         };
 

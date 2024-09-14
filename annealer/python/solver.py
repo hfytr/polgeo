@@ -194,6 +194,7 @@ def make_lp(
     n = len(adj)
     x = m.addVars(k, n, vtype=GRB.BINARY, name="x")
     w = m.addVars(k, n, vtype=GRB.BINARY, name="w")
+    abs_diff = m.addVars(k, n, vtype=GRB.BINARY, name="absolute difference")
     y = m.addVars(
         [
             (district, node, int(child))
@@ -282,6 +283,27 @@ def make_lp(
     assignment = [
         [1 if assignment_raw[j] == i else 0 for j in range(n)] for i in range(k)
     ]
+
+    bound_abs_diff_1 = m.addConstrs(
+        (
+            abs_diff[i, j] >= x[i, j] - 1
+            for i in range(k)
+            for j in range(n)
+            if bool(int(assignment[i][j]))
+        ),
+        name="set abs diff if assignment 1",
+    )
+
+    bound_abs_diff_0 = m.addConstrs(
+        (
+            abs_diff[i, j] == x[i, j]
+            for i in range(k)
+            for j in range(n)
+            if not bool(int(assignment[i][j]))
+        ),
+        name="set abs diff if assignment 0",
+    )
+
     m.setObjective(
         quicksum((x[i, j] - assignment[i][j]) ** 2 for i in range(k) for j in range(n)),
         GRB.MINIMIZE,
