@@ -1,15 +1,13 @@
 {
-  inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
-    flake-utils.url = "github:numtide/flake-utils";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    crane = {
-      url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+  inputs.flake-utils.url = "github:numtide/flake-utils";
+  inputs.rust-overlay = {
+    url = "github:oxalica/rust-overlay";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  inputs.crane = {
+    url = "github:ipetkov/crane";
+    inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = { self, nixpkgs, rust-overlay, flake-utils, crane, ... }:
@@ -35,8 +33,9 @@
         }).version;
 
         pythonVersion = pkgs.python311;
+        pythonPackages = pkgs.python311Packages;
         wheelTail =
-          "cp311-cp311-manylinux_2_35_x86_64"; # Change if pythonVersion changes
+          "cp311-cp311-linux_x86_64"; # Change if pythonVersion changes
         wheelName = "${projectName}-${projectVersion}-${wheelTail}.whl";
 
         crateCfg = {
@@ -48,20 +47,19 @@
         crateWheel = (craneLib.buildPackage (crateCfg // {
           pname = projectName;
           version = projectVersion;
-          # cargoArtifacts = crateArtifacts;
         })).overrideAttrs (old: {
           nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.maturin ];
           buildPhase = old.buildPhase + ''
             maturin build --offline --target-dir ./target
           '';
           installPhase = old.installPhase + ''
+            ls target/wheels
             cp ./target/wheels/${wheelName} $out/
           '';
         });
       in rec {
-        packages = rec {
+        packages = {
           default = crateWheel; # The wheel itself
-
           # A python version with the library installed
           pythonEnv = pythonVersion.withPackages
             (ps: [ (lib.pythonPackage ps) ] ++ (with ps; [
@@ -73,16 +71,15 @@
               keras
               geopandas
               shapely
-              gurobipy
               matplotlib
-              ipython
+              highspy
             ]));
         };
 
         lib = {
           # To use in other builds with the "withPackages" call
           pythonPackage = ps:
-            ps.buildPythonPackage rec {
+            ps.buildPythonPackage {
               pname = projectName;
               format = "wheel";
               version = projectVersion;
@@ -92,7 +89,7 @@
             };
         };
 
-        devShells.default = pkgs.mkShell rec {
+        devShells.default = pkgs.mkShell {
           name = "python-dev";
           src = ./.;
           nativeBuildInputs = with pkgs; [
@@ -104,8 +101,7 @@
           ];
         };
 
-        RUST_BACKTRACE = 1;
-        devShells.rust = pkgs.mkShell rec {
+        devShells.rust = pkgs.mkShell {
           name = "rust-dev";
           src = ./.;
           nativeBuildInputs = with pkgs; [
@@ -113,21 +109,12 @@
             maturin
             packages.pythonEnv
             pyright
-            # gurobi
           ];
           buildInputs = with pkgs; [
             openssl
             pkg-config
             rustpkg
           ];
-        };
-
-        apps = rec {
-          ipython = {
-            type = "app";
-            program = "${packages.pythonEnv}/bin/ipython";
-          };
-          default = ipython;
         };
       });
 }

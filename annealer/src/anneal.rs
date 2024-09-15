@@ -116,34 +116,6 @@ impl Annealer {
                 .collect_vec();
 
             let num_feasible = feasible_moves.len();
-            if num_feasible == 0 {
-                dbg!(&step);
-                _print_grid(&self.cur_state.1, 4);
-                dbg!((0..self.num_nodes)
-                    .flat_map(|node| {
-                        self.adj[node]
-                            .iter()
-                            .filter_map(move |neighbor| {
-                                if immut_self.cur_state.1[*neighbor] == immut_self.cur_state.1[node]
-                                    || !immut_self
-                                        .feasible(Some((node, immut_self.cur_state.1[*neighbor])))
-                                {
-                                    dbg!("infeasible");
-                                    None
-                                } else {
-                                    dbg!("feasible");
-                                    Some((node, immut_self.cur_state.1[*neighbor]))
-                                }
-                            })
-                            .unique()
-                    })
-                    .collect_vec());
-                // return (
-                //     self.cur_state.0.clone(),
-                //     self.cur_state.1.clone(),
-                //     self.hist.clone(),
-                // );
-            }
             let chunks = feasible_moves
                 .into_iter()
                 .chunks((num_feasible + num_threads as usize - 1) / num_threads as usize)
@@ -241,7 +213,6 @@ impl Annealer {
     }
 
     fn feasible(&self, changes: Option<(usize, usize)>) -> bool {
-        dbg!(&changes);
         let (changed_node, district) = changes.unwrap_or((0, self.cur_state.1[0]));
 
         let populations = self.population.iter().enumerate().fold(
@@ -259,7 +230,6 @@ impl Annealer {
         if *populations.iter().max().unwrap() as f32 / *populations.iter().min().unwrap() as f32
             > 1.0 + self.pop_thresh
         {
-            dbg!("pop infeasible");
             return false;
         }
         // whether we have flood filled a given district

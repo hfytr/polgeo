@@ -4,11 +4,10 @@ import re
 import time
 
 import geopandas as gpd
-import gurobipy as gp
+import highspy
 import matplotlib.pyplot as plt
 import networkx as nx
 import pandas as pd
-from gurobipy import GRB, LinExpr, quicksum
 from matplotlib.colors import to_rgba
 from shapely import unary_union
 from shapely.geometry import MultiPolygon, Polygon
@@ -184,151 +183,84 @@ def make_lp(
     assignment_raw: list[int],
     adj: list[list[int]],
     populations: list[int],
-    k: int,
-    width: int,
-    height: int,
+    d: int,
     pop_thresh: float,
 ):
-    m = gp.Model("flow")
+    h = highspy.Highs()
 
+    inf = highspy.kHighsInf
     n = len(adj)
-    x = m.addVars(k, n, vtype=GRB.BINARY, name="x")
-    w = m.addVars(k, n, vtype=GRB.BINARY, name="w")
-    abs_diff = m.addVars(k, n, vtype=GRB.BINARY, name="absolute difference")
-    y = m.addVars(
-        [
-            (district, node, int(child))
-            for district in range(k)
-            for node in range(n)
-            for child in adj[node]
-        ],
-        lb=0.0,
-        vtype=GRB.CONTINUOUS,
-        name="y",
-    )
-    district_pops = m.addVars(k, vtype=GRB.INTEGER, name="p", lb=0.0)
-    highest_pop = m.addVar(lb=0.0, vtype=GRB.INTEGER, name="p_max")
-    lowest_pop = m.addVar(lb=0.0, vtype=GRB.INTEGER, name="p_min")
-
-    district_pop_constr = m.addConstrs(
-        (
-            quicksum(x[i, j] * populations[j] for j in range(n)) == district_pops[i]
-            for i in range(k)
-        ),
-        name="set district populations",
-    )
-
-    highest_pop_constr = m.addConstrs(
-        (highest_pop >= district_pops[i] for i in range(k)),
-        name="set highest pop district",
-    )
-
-    lowest_pop_constr = m.addConstrs(
-        (lowest_pop <= district_pops[i] for i in range(k)),
-        name="set lowest pop district",
-    )
-
-    population_balance = m.addConstr(
-        (highest_pop * pop_thresh <= lowest_pop), name="population balance"
-    )
-
-    one_district_per_node = m.addConstrs(
-        (quicksum(x[i, j] for i in range(k)) == 1 for j in range(n)),
-        name="one district per node",
-    )
-
-    sink_in_district = m.addConstrs(
-        (w[i, j] <= x[i, j] for i in range(k) for j in range(n)),
-        name="sink in same district",
-    )
-
-    one_sink_per_district = m.addConstrs(
-        (quicksum(w[i, j] for j in range(n)) == 1 for i in range(k)),
-        name="one sink per district",
-    )
-
-    net_flow = m.addConstrs(
-        (
-            (
-                quicksum(y[i, j, k] for k in adj[j])
-                - quicksum(y[i, k, j] for k in adj[j])
-                >= x[i, j] - (n - k) * w[i, j]
+    highest_pop = h.addVariable(lb=0, ub=inf, type=highspy.HighsVarType.kInteger)
+    lowest_pop = h.addVariable(lb=0, ub=inf, type=highspy.HighsVarType.kInteger)
+    x, w, y, abs_diff, district_pops = [], [], [], [], []
+    for i in range(d):
+        district_pops.append(
+            h.addVariable(lb=0, ub=inf, type=highspy.HighsVarType.kInteger)
+        )
+        y.append({})
+        for j in range(n):
+            x.append(h.addVariable(lb=0, ub=0, type=highspy.HighsVarType.kInteger))
+            w.append(h.addVariable(lb=0, ub=0, type=highspy.HighsVarType.kInteger))
+            abs_diff.append(
+                h.addVariable(lb=0, ub=0, type=highspy.HighsVarType.kInteger)
             )
-            for i in range(k)
-            for j in range(n)
-        ),
-        name="net flow",
-    )
-
-    ubound_outflow = m.addConstrs(
-        (
-            y[i, j, k] <= x[i, j] * (n - k)
-            for i in range(k)
-            for j in range(n)
-            for k in adj[j]
-        ),
-        name="upperbound outflow of node",
-    )
-
-    ubound_inflow = m.addConstrs(
-        (
-            y[i, j, k] <= x[i, k] * (n - k)
-            for i in range(k)
-            for j in range(n)
-            for k in adj[j]
-        ),
-        name="upperbound inflow of node",
-    )
+            for k in adj[j]:
+                y[-1].update(
+                    {
+                        (j, k): h.addVariable(
+                            0, inf, type=highspy.HighsVarType.kContinuous
+                        )
+                    }
+                )
 
     assignment = [
-        [1 if assignment_raw[j] == i else 0 for j in range(n)] for i in range(k)
+        1 if assignment_raw[j] == i else 0 for j in range(n) for i in range(d)
     ]
 
-    bound_abs_diff_1 = m.addConstrs(
-        (
-            abs_diff[i, j] >= x[i, j] - 1
-            for i in range(k)
-            for j in range(n)
-            if bool(int(assignment[i][j]))
-        ),
-        name="set abs diff if assignment 1",
-    )
+    # yes j is the first index, sue me
+    # one district per node
+    for j in range(n):
+        h.addConstr(sum(x[i * n + j] for i in range(d)) == 1)
 
-    bound_abs_diff_0 = m.addConstrs(
-        (
-            abs_diff[i, j] == x[i, j]
-            for i in range(k)
-            for j in range(n)
-            if not bool(int(assignment[i][j]))
-        ),
-        name="set abs diff if assignment 0",
-    )
+    for i in range(d):
+        # population constraints
+        h.addConstr(
+            district_pops[i] == sum(x[i * n + j] * populations[j] for j in range(n))
+        )
+        h.addConstr(highest_pop >= district_pops[i])
+        h.addConstr(lowest_pop <= district_pops[i])
+        # population balance
+        h.addConstr(highest_pop * pop_thresh <= lowest_pop)
 
-    m.setObjective(
-        quicksum((x[i, j] - assignment[i][j]) ** 2 for i in range(k) for j in range(n)),
-        GRB.MINIMIZE,
-    )
-    m.optimize()
-    fit = m.ObjVal
-    x = {
-        x.getAttr("VarName"): x.getAttr("X")
-        for x in m.getVars()
-        if x.getAttr("VarName")[0] == "x"
-    }
-    grid = [["" for j in range(width)] for i in range(height)]
-    output_assignment = [k for _ in range(n)]
-    for key in x:
-        regex = re.match(r"x\[(\d+),(\d+)\]", key)
-        if regex:
-            district = int(regex.group(1))
-            index = int(regex.group(2))
-            if int(x[key]):
-                output_assignment[index] = district
-            row = index // width
-            col = index % width
-            if int(x[key]):
-                grid[row][col] = str(district)
-    return (output_assignment, fit)
+        # one sink per district
+        h.addConstr(sum(w[i * n + j] for j in range(n)) == 1)
+
+        for j in range(n):
+            # sink is in district
+            h.addConstr(w[i * n + j] <= x[i * n + j])
+
+            # set absolute difference with starting assignment
+            # used for objective
+            if bool(int(assignment[i * n + j])):
+                h.addConstr(abs_diff[i * n + j] == 1 - x[i * n + j])
+            else:
+                h.addConstr(abs_diff[i * n + j] == x[i * n + j])
+
+            # net flow constraint
+            h.addConstr(
+                sum(y[i][(j, k)] for k in adj[j]) - sum(y[i][(k, j)] for k in adj[j])
+                >= x[i * n + j] - (n - d) * w[i * n + j]
+            )
+            for k in adj[j]:
+                # flow is between nodes of same, correct district
+                h.addConstr(y[i][(j, k)] <= x[i * n + j] * (n - d))
+                h.addConstr(y[i][(j, k)] <= x[i * n + k] * (n - d))
+
+    # as close as possible to input assignment
+    h.minimize(sum(abs_diff[i * n + j] for i in range(d) for j in range(n)))
+
+    fit = h.getObjective()
+    solution = h.getSolution()
 
 
 def test_grid(width, height, population, num_districts):
@@ -389,8 +321,6 @@ def test_grid(width, height, population, num_districts):
             adj,
             population,
             num_districts,
-            width,
-            height,
             POP_THRESH,
         )
         hist.append((anneal_cycle_hist, fit))
