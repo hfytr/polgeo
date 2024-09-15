@@ -4,6 +4,7 @@ import re
 import time
 
 import geopandas as gpd
+import gurobipy as gp
 import highspy
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -242,7 +243,7 @@ def make_lp(
             # set absolute difference with starting assignment
             # used for objective
             if bool(int(assignment[i * n + j])):
-                h.addConstr(abs_diff[i * n + j] == 1 - x[i * n + j])
+                h.addConstr(abs_diff[i * n + j] == x[i * n + j] - 1)
             else:
                 h.addConstr(abs_diff[i * n + j] == x[i * n + j])
 
