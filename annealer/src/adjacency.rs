@@ -1,9 +1,9 @@
+use crate::vec3::Vector3;
 use geo::{
     geometry::{Coord, LineString, Point, Polygon},
     CoordNum, Intersects,
 };
 use itertools::Itertools;
-use nalgebra::Vector3;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
@@ -180,12 +180,12 @@ fn buffer_angle(pi: &Point, pj: &Point, pk: &Point, dist: f64) -> Point {
     let vi = v3_from_point(pi);
     let vj = v3_from_point(pj);
     let vk = v3_from_point(pk);
-    let ij = (vj - vi).normalize();
-    let kj = (vj - vk).normalize();
-    let jk = (vk - vj).normalize();
+    let ij = (&vj - &vi).normalize();
+    let kj = (&vj - &vk).normalize();
+    let jk = (&vk - &vj).normalize();
     // counter-clockwise winding on Polygons by default
     let direction = ij.cross(&jk).normalize().z;
-    point_from_v3(&(direction * dist * (ij + kj) + vj))
+    point_from_v3(&(&((&ij + &kj) * direction * dist) + &vj))
 }
 
 pub trait CollectLineString<T: CoordNum> {
@@ -214,10 +214,14 @@ where
     }
 }
 
-fn v3_from_point(p: &Point) -> Vector3<f64> {
-    Vector3::new(p.x(), p.y(), 0.0)
+fn v3_from_point(p: &Point) -> Vector3 {
+    Vector3 {
+        x: p.x(),
+        y: p.y(),
+        z: 0.0,
+    }
 }
 
-fn point_from_v3(v: &Vector3<f64>) -> Point {
+fn point_from_v3(v: &Vector3) -> Point {
     Point::new(v.x, v.y)
 }

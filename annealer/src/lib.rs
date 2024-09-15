@@ -2,6 +2,7 @@ pub mod adjacency;
 mod anneal;
 mod init;
 mod rand;
+mod vec3;
 pub use anneal::Annealer;
 pub use init::init_precinct_with_threads;
 

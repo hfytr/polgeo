@@ -54,8 +54,6 @@ fn init_precinct(
     let mut result = Vec::new();
     let mut sol_feasible = false;
     let mut vis;
-    dbg!(max_pop);
-    dbg!(min_pop);
 
     while !sol_feasible {
         vis = vec![false; num_nodes];

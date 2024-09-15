@@ -284,11 +284,6 @@ def test_grid(width, height, population, num_districts):
         col = i % width
         result = []
         for offset in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-            if i == 1:
-                print(offset)
-                print((row, col))
-                print(row + offset[0])
-                print(col + offset[1])
             if 0 <= row + offset[0] < height and 0 <= col + offset[1] < width:
                 result.append((row + offset[0]) * width + (col + offset[1]))
         return result
@@ -329,7 +324,7 @@ def test_grid(width, height, population, num_districts):
 
 
 if __name__ == "__main__":
-    assignment, hist = test_grid(4, 4, range(16), 2)
+    assignment, hist = test_grid(3, 3, range(9), 2)
     # tiles = gpd.read_file("../../data/tiles.shp")
     # buffered = gpd.read_file("../../data/buffered.shp")
     # unbuffered = gpd.read_file("../../data/unbuffered.shp")
