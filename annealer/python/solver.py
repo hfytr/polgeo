@@ -4,7 +4,6 @@ import re
 import time
 
 import geopandas as gpd
-import gurobipy as gp
 import highspy
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -199,11 +198,14 @@ def make_lp(
             h.addVariable(lb=0, ub=inf, type=highspy.HighsVarType.kInteger)
         )
         y.append({})
+        x.append([])
+        w.append([])
+        abs_diff.append([])
         for j in range(n):
-            x.append(h.addVariable(lb=0, ub=0, type=highspy.HighsVarType.kInteger))
-            w.append(h.addVariable(lb=0, ub=0, type=highspy.HighsVarType.kInteger))
-            abs_diff.append(
-                h.addVariable(lb=0, ub=0, type=highspy.HighsVarType.kInteger)
+            x[-1].append(h.addVariable(lb=0, ub=1, type=highspy.HighsVarType.kInteger))
+            w[-1].append(h.addVariable(lb=0, ub=1, type=highspy.HighsVarType.kInteger))
+            abs_diff[-1].append(
+                h.addVariable(lb=0, ub=1, type=highspy.HighsVarType.kInteger)
             )
             for k in adj[j]:
                 y[-1].update(
@@ -215,50 +217,49 @@ def make_lp(
                 )
 
     assignment = [
-        1 if assignment_raw[j] == i else 0 for j in range(n) for i in range(d)
+        [1 if assignment_raw[j] == i else 0 for j in range(n)] for i in range(d)
     ]
 
     # yes j is the first index, sue me
     # one district per node
     for j in range(n):
-        h.addConstr(sum(x[i * n + j] for i in range(d)) == 1)
+        h.addConstr(sum(x[i][j] for i in range(d)) == 1)
 
     for i in range(d):
         # population constraints
-        h.addConstr(
-            district_pops[i] == sum(x[i * n + j] * populations[j] for j in range(n))
-        )
+        h.addConstr(district_pops[i] == sum(x[i][j] * populations[j] for j in range(n)))
         h.addConstr(highest_pop >= district_pops[i])
         h.addConstr(lowest_pop <= district_pops[i])
-        # population balance
+        # # population balance
         h.addConstr(highest_pop * pop_thresh <= lowest_pop)
 
         # one sink per district
-        h.addConstr(sum(w[i * n + j] for j in range(n)) == 1)
+        h.addConstr(sum(w[i][j] for j in range(n)) == 1)
 
         for j in range(n):
             # sink is in district
-            h.addConstr(w[i * n + j] <= x[i * n + j])
+            h.addConstr(w[i][j] <= x[i][j])
 
             # set absolute difference with starting assignment
             # used for objective
-            if bool(int(assignment[i * n + j])):
-                h.addConstr(abs_diff[i * n + j] == x[i * n + j] - 1)
+            if bool(int(assignment[i][j])):
+                h.addConstr(abs_diff[i][j] == x[i][j] - 1)
             else:
-                h.addConstr(abs_diff[i * n + j] == x[i * n + j])
+                h.addConstr(abs_diff[i][j] == x[i][j])
 
             # net flow constraint
             h.addConstr(
                 sum(y[i][(j, k)] for k in adj[j]) - sum(y[i][(k, j)] for k in adj[j])
-                >= x[i * n + j] - (n - d) * w[i * n + j]
+                >= x[i][j] - (n - d) * w[i][j]
             )
             for k in adj[j]:
                 # flow is between nodes of same, correct district
-                h.addConstr(y[i][(j, k)] <= x[i * n + j] * (n - d))
-                h.addConstr(y[i][(j, k)] <= x[i * n + k] * (n - d))
+                h.addConstr(y[i][(j, k)] <= x[i][j] * (n - d))
+                h.addConstr(y[i][(j, k)] <= x[i][k] * (n - d))
+                a = 0
 
     # as close as possible to input assignment
-    h.minimize(sum(abs_diff[i * n + j] for i in range(d) for j in range(n)))
+    h.minimize(sum(abs_diff[i][j] for i in range(d) for j in range(n)))
 
     fit = h.getObjective()
     solution = h.getSolution()
@@ -325,7 +326,7 @@ def test_grid(width, height, population, num_districts):
 
 
 if __name__ == "__main__":
-    assignment, hist = test_grid(3, 3, range(9), 2)
+    assignment, hist = test_grid(4, 4, [1 for i in range(16)], 2)
     # tiles = gpd.read_file("../../data/tiles.shp")
     # buffered = gpd.read_file("../../data/buffered.shp")
     # unbuffered = gpd.read_file("../../data/unbuffered.shp")
