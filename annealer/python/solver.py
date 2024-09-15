@@ -1,16 +1,11 @@
 import logging
 import os
-import re
 import time
 
 import geopandas as gpd
 import highspy
 import matplotlib.pyplot as plt
-import networkx as nx
-import pandas as pd
-from matplotlib.colors import to_rgba
 from shapely import unary_union
-from shapely.geometry import MultiPolygon, Polygon
 
 from annealer import AnnealerService, init_precinct
 
@@ -55,37 +50,6 @@ def get_data(tracts_path, pop_path):
     return tracts
 
 
-def graph_adj(gdf, adj):
-    def create_graph(adj_list):
-        G = nx.Graph()
-        for key, neighbors in adj_list.items():
-            for neighbor in neighbors:
-                G.add_edge(key, neighbor)
-        return G
-
-    G = create_graph(adj)
-    fig, ax = plt.subplots(figsize=(12, 12))
-
-    gdf.plot(ax=ax, edgecolor="black", color="lightgrey")
-
-    pos = {idx: row["geometry"].centroid.coords[0] for idx, row in gdf.iterrows()}
-
-    nx.draw(
-        G,
-        pos,
-        ax=ax,
-        with_labels=False,
-        node_color="blue",
-        edge_color="red",
-        node_size=1,
-        font_color="white",
-        alpha=0.7,
-        edgecolors="black",
-    )
-
-    plt.savefig("census_tracts_with_graph.png", dpi=300)
-
-
 def shp_from_assign(gdf, col):
     ax = gdf.plot(column=col, legend=True, figsize=(10, 6), cmap="viridis")
     plt.savefig("initial_districts.png", dpi=300)
@@ -93,7 +57,7 @@ def shp_from_assign(gdf, col):
 
 
 def objective(
-    x: list[list[bool]], ind_to_geoid: dict[int, int], tracts: [gpd.GeoDataFrame]
+    x: list[list[bool]], ind_to_geoid: dict[int, int], tracts: list[gpd.GeoDataFrame]
 ):
     result = 0
     for district in x:
@@ -175,15 +139,27 @@ def solve():
 ANNEAL_POP_THRESH = 0.50
 T0 = 0.1
 INIT_POP_THRESH = 0.01
-POP_THRESH = 0.95
+POP_THRESH = 0.8
 NUM_THREADS = 8
+
+
+def pprint_assignment(assignment: list[int], d: int, width: int, height: int):
+    grid = []
+    for i, district in enumerate(assignment):
+        if i % width == 0:
+            grid.append([])
+        grid[-1].append(str(round(district)))
+
+    print("\n".join(["".join(gridi) for gridi in grid]))
 
 
 def make_lp(
     assignment_raw: list[int],
     adj: list[list[int]],
     populations: list[int],
-    d: int,
+    d: _InfoPrinterAbstract,
+    width: int,
+    height: int,
     pop_thresh: float,
 ):
     h = highspy.Highs()
@@ -211,7 +187,7 @@ def make_lp(
                 y[-1].update(
                     {
                         (j, k): h.addVariable(
-                            0, inf, type=highspy.HighsVarType.kContinuous
+                            lb=0, ub=inf, type=highspy.HighsVarType.kContinuous
                         )
                     }
                 )
@@ -230,7 +206,7 @@ def make_lp(
         h.addConstr(district_pops[i] == sum(x[i][j] * populations[j] for j in range(n)))
         h.addConstr(highest_pop >= district_pops[i])
         h.addConstr(lowest_pop <= district_pops[i])
-        # # population balance
+        # population balance
         h.addConstr(highest_pop * pop_thresh <= lowest_pop)
 
         # one sink per district
@@ -242,8 +218,8 @@ def make_lp(
 
             # set absolute difference with starting assignment
             # used for objective
-            if bool(int(assignment[i][j])):
-                h.addConstr(abs_diff[i][j] == x[i][j] - 1)
+            if bool(round(assignment[i][j])):
+                h.addConstr(abs_diff[i][j] == 1 - x[i][j])
             else:
                 h.addConstr(abs_diff[i][j] == x[i][j])
 
@@ -256,13 +232,38 @@ def make_lp(
                 # flow is between nodes of same, correct district
                 h.addConstr(y[i][(j, k)] <= x[i][j] * (n - d))
                 h.addConstr(y[i][(j, k)] <= x[i][k] * (n - d))
-                a = 0
 
     # as close as possible to input assignment
-    h.minimize(sum(abs_diff[i][j] for i in range(d) for j in range(n)))
+    # h.minimize(sum(abs_diff[i][j] for i in range(d) for j in range(n)))
+    h.minimize(highest_pop - lowest_pop)
 
-    fit = h.getObjective()
-    solution = h.getSolution()
+    if h.getModelStatus() == highspy.HighsModelStatus.kInfeasible:
+        print("sol infeasible")
+        exit()
+
+    fit = h.getInfo().objective_function_value
+    values = list(reversed(h.getSolution().col_value))
+
+    # highs doesn't store variable names, so we need to reconstruct from vector
+    highest_pop = values.pop()
+    lowest_pop = values.pop()
+    for i in range(d):
+        district_pops[i] = values.pop()
+        for j in range(n):
+            x[i][j] = values.pop()
+            w[i][j] = values.pop()
+            abs_diff[i][j] = values.pop()
+            for k in adj[j]:
+                y[i][(j, k)] = values.pop()
+
+    solution = [d] * n
+    for i in range(d):
+        for j in range(n):
+            if bool(round(x[i][j])):
+                solution[j] = i
+    pprint_assignment(solution, d, width, height)
+
+    return (solution, fit)
 
 
 def test_grid(width, height, population, num_districts):
@@ -309,15 +310,18 @@ def test_grid(width, height, population, num_districts):
         T0,
     )
     hist: list[tuple[list[float], float]] = []
-    for i in range(20):
+    for i in range(10):
         (_, assignment, anneal_cycle_hist) = annealer.anneal(
             assignment, 10, NUM_THREADS
         )
+        pprint_assignment(assignment, num_districts, width, height)
         (assignment, fit) = make_lp(
             assignment,
             adj,
             population,
             num_districts,
+            width,
+            height,
             POP_THRESH,
         )
         hist.append((anneal_cycle_hist, fit))
@@ -326,13 +330,5 @@ def test_grid(width, height, population, num_districts):
 
 
 if __name__ == "__main__":
-    assignment, hist = test_grid(4, 4, [1 for i in range(16)], 2)
-    # tiles = gpd.read_file("../../data/tiles.shp")
-    # buffered = gpd.read_file("../../data/buffered.shp")
-    # unbuffered = gpd.read_file("../../data/unbuffered.shp")
-    # fig, ax = plt.subplots(figsize=(10, 10))
-    # tiles.boundary.plot(ax=ax, linewidth=1, edgecolor="black", label="tile")
-    # buffered.plot(ax=ax, color="blue", alpha=0.5, edgecolor="k", label="GDF1")
-    # unbuffered.plot(ax=ax, color="blue", alpha=0.5, edgecolor="k", label="GDF1")
-    # ax.legend()
-    # plt.show()
+    side = 6
+    assignment, hist = test_grid(side, side, [i for i in range(side**2)], 2)

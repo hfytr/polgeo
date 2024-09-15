@@ -50,7 +50,7 @@
         })).overrideAttrs (old: {
           nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.maturin ];
           buildPhase = old.buildPhase + ''
-            maturin build --offline --target-dir ./target
+            maturin build --release --offline --target-dir ./target
           '';
           installPhase = old.installPhase + ''
             ls target/wheels
@@ -63,12 +63,9 @@
           # A python version with the library installed
           pythonEnv = pythonVersion.withPackages
             (ps: [ (lib.pythonPackage ps) ] ++ (with ps; [
-              pandas
               networkx
               black
               isort
-              tensorflow
-              keras
               geopandas
               shapely
               matplotlib
