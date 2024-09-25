@@ -69,7 +69,7 @@
               geopandas
               shapely
               matplotlib
-              highspy
+              gurobipy
             ]));
         };
 
@@ -94,7 +94,7 @@
             maturin
             packages.pythonEnv
             pyright
-            highs
+            gurobi
           ];
         };
 

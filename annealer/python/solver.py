@@ -1,5 +1,7 @@
 import json
 import logging
+import gurobipy as gp
+from gurobipy import GRB, quicksum
 import os
 import random
 
@@ -135,106 +137,146 @@ def run_lp(
     height: int,
     pop_thresh: float,
 ):
-    h = highspy.Highs()
+    m = gp.Model("flow")
 
-    inf = highspy.kHighsInf
     n = len(adj)
-    highest_pop = h.addVariable(lb=0, ub=inf, type=highspy.HighsVarType.kInteger)
-    lowest_pop = h.addVariable(lb=0, ub=inf, type=highspy.HighsVarType.kInteger)
-    x, w, y, abs_diff, district_pops = [], [], [], [], []
-    for i in range(d):
-        district_pops.append(
-            h.addVariable(lb=0, ub=inf, type=highspy.HighsVarType.kInteger)
-        )
-        y.append({})
-        x.append([])
-        w.append([])
-        abs_diff.append([])
-        for j in range(n):
-            x[-1].append(h.addVariable(lb=0, ub=1, type=highspy.HighsVarType.kInteger))
-            w[-1].append(h.addVariable(lb=0, ub=1, type=highspy.HighsVarType.kInteger))
-            abs_diff[-1].append(
-                h.addVariable(lb=0, ub=1, type=highspy.HighsVarType.kInteger)
+    x = m.addVars(d, n, vtype=GRB.BINARY, name="x")
+    w = m.addVars(d, n, vtype=GRB.BINARY, name="w")
+    abs_diff = m.addVars(d, n, vtype=GRB.BINARY, name="absolute difference")
+    y = m.addVars(
+        [
+            (district, node, int(child))
+            for district in range(d)
+            for node in range(n)
+            for child in adj[node]
+        ],
+        lb=0.0,
+        vtype=GRB.CONTINUOUS,
+        name="y",
+    )
+    district_pops = m.addVars(d, vtype=GRB.INTEGER, name="p", lb=0.0)
+    highest_pop = m.addVar(lb=0.0, vtype=GRB.INTEGER, name="p_max")
+    lowest_pop = m.addVar(lb=0.0, vtype=GRB.INTEGER, name="p_min")
+
+    district_pop_constr = m.addConstrs(
+        (
+            quicksum(x[i, j] * populations[j] for j in range(n)) == district_pops[i]
+            for i in range(d)
+        ),
+        name="set district populations",
+    )
+
+    highest_pop_constr = m.addConstrs(
+        (highest_pop >= district_pops[i] for i in range(d)),
+        name="set highest pop district",
+    )
+
+    lowest_pop_constr = m.addConstrs(
+        (lowest_pop <= district_pops[i] for i in range(d)),
+        name="set lowest pop district",
+    )
+
+    population_balance = m.addConstr(
+        (highest_pop * pop_thresh <= lowest_pop), name="population balance"
+    )
+
+    one_district_per_node = m.addConstrs(
+        (quicksum(x[i, j] for i in range(d)) == 1 for j in range(n)),
+        name="one district per node",
+    )
+
+    sink_in_district = m.addConstrs(
+        (w[i, j] <= x[i, j] for i in range(d) for j in range(n)),
+        name="sink in same district",
+    )
+
+    one_sink_per_district = m.addConstrs(
+        (quicksum(w[i, j] for j in range(n)) == 1 for i in range(d)),
+        name="one sink per district",
+    )
+
+    net_flow = m.addConstrs(
+        (
+            (
+                quicksum(y[i, j, k] for k in adj[j])
+                - quicksum(y[i, k, j] for k in adj[j])
+                >= x[i, j] - (n - d) * w[i, j]
             )
-            for k in adj[j]:
-                y[-1].update(
-                    {
-                        (j, k): h.addVariable(
-                            lb=0, ub=inf, type=highspy.HighsVarType.kContinuous
-                        )
-                    }
-                )
+            for i in range(d)
+            for j in range(n)
+        ),
+        name="net flow",
+    )
+
+    ubound_outflow = m.addConstrs(
+        (
+            y[i, j, k] <= x[i, j] * (n - d)
+            for i in range(d)
+            for j in range(n)
+            for k in adj[j]
+        ),
+        name="upperbound outflow of node",
+    )
+
+    ubound_inflow = m.addConstrs(
+        (
+            y[i, j, k] <= x[i, k] * (n - d)
+            for i in range(d)
+            for j in range(n)
+            for k in adj[j]
+        ),
+        name="upperbound inflow of node",
+    )
 
     assignment = [
         [1 if assignment_raw[j] == i else 0 for j in range(n)] for i in range(d)
     ]
 
-    # yes j is the first index, sue me
-    # one district per node
-    for j in range(n):
-        h.addConstr(sum(x[i][j] for i in range(d)) == 1)
-    # population balance
-    h.addConstr(highest_pop * pop_thresh <= lowest_pop)
+    bound_abs_diff_1 = m.addConstrs(
+        (
+            abs_diff[i, j] >= x[i, j] - 1
+            for i in range(d)
+            for j in range(n)
+            if bool(int(assignment[i][j]))
+        ),
+        name="set abs diff if assignment 1",
+    )
 
-    for i in range(d):
-        # population constraints
-        h.addConstr(district_pops[i] == sum(x[i][j] * populations[j] for j in range(n)))
-        h.addConstr(highest_pop >= district_pops[i])
-        h.addConstr(lowest_pop <= district_pops[i])
+    bound_abs_diff_0 = m.addConstrs(
+        (
+            abs_diff[i, j] == x[i, j]
+            for i in range(d)
+            for j in range(n)
+            if not bool(int(assignment[i][j]))
+        ),
+        name="set abs diff if assignment 0",
+    )
 
-        # one sink per district
-        h.addConstr(sum(w[i][j] for j in range(n)) == 1)
-
-        for j in range(n):
-            # sink is in district
-            h.addConstr(w[i][j] <= x[i][j])
-
-            # set absolute difference with starting assignment
-            # used for objective
-            if bool(round(assignment[i][j])):
-                h.addConstr(abs_diff[i][j] == 1 - x[i][j])
-            else:
-                h.addConstr(abs_diff[i][j] == x[i][j])
-
-            # net flow constraint
-            h.addConstr(
-                sum(y[i][(j, k)] for k in adj[j]) - sum(y[i][(k, j)] for k in adj[j])
-                >= x[i][j] - (n - d) * w[i][j]
-            )
-            for k in adj[j]:
-                # flow is between nodes of same, correct district
-                h.addConstr(y[i][(j, k)] <= x[i][j] * (n - d))
-                h.addConstr(y[i][(j, k)] <= x[i][k] * (n - d))
-
-    # as close as possible to input assignment
-    h.minimize(sum(abs_diff[i][j] for i in range(d) for j in range(n)))
-
-    if h.getModelStatus() == highspy.HighsModelStatus.kInfeasible:
-        print("sol infeasible")
-        exit()
-
-    fit = h.getInfo().objective_function_value
-    values = list(reversed(h.getSolution().col_value))
-
-    # highs doesn't store variable names, so we need to reconstruct from vector
-    highest_pop = values.pop()
-    lowest_pop = values.pop()
-    for i in range(d):
-        district_pops[i] = values.pop()
-        for j in range(n):
-            x[i][j] = values.pop()
-            w[i][j] = values.pop()
-            abs_diff[i][j] = values.pop()
-            for k in adj[j]:
-                y[i][(j, k)] = values.pop()
-
-    solution = [d] * n
-    for i in range(d):
-        for j in range(n):
-            if bool(round(x[i][j])):
-                solution[j] = i
-    print(fit);
-    pprint_assignment(solution, d, width, height)
+    m.setObjective(
+        quicksum((x[i, j] - assignment[i][j]) ** 2 for i in range(d) for j in range(n)),
+        GRB.MINIMIZE,
+    )
+    m.optimize()
+    fit = m.ObjVal
+    x = {
+        x.getAttr("VarName"): x.getAttr("X")
+        for x in m.getVars()
+        if x.getAttr("VarName")[0] == "x"
+    }
+    grid = [["" for j in range(width)] for i in range(height)]
+    output_assignment = [d for _ in range(n)]
+    for key in x:
+        regex = re.match(r"x\[(\d+),(\d+)\]", key)
+        if regex:
+            district = int(regex.group(1))
+            index = int(regex.group(2))
+            if int(x[key]):
+                output_assignment[index] = district
+            row = index // width
+            col = index % width
+            if int(x[key]):
+                grid[row][col] = str(district)
+    return (output_assignment, fit)
 
     return (solution, fit)
 
