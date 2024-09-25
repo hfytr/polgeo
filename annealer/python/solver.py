@@ -60,28 +60,6 @@ def shp_from_assign(gdf, col):
     plt.show()
 
 
-def objective(
-    x: list[list[bool]], ind_to_geoid: dict[int, int], tracts: list[gpd.GeoDataFrame]
-):
-    result = 0
-    for district in x:
-        dist_start = time.perf_counter() * 1000
-        geoid_list = [
-            ind_to_geoid[i] for i, included in enumerate(district) if included
-        ]
-        mk_geoids = time.perf_counter() * 1000
-        selected_tracts = tracts[tracts.index.isin(geoid_list)]
-        select = time.perf_counter() * 1000
-        combined_geometry = unary_union(selected_tracts.geometry)
-        combine = time.perf_counter() * 1000
-        result += combined_geometry.area / combined_geometry.convex_hull.area
-        divide = time.perf_counter() * 1000
-        print(
-            f"total: {divide - dist_start} mk_geoids: {mk_geoids - dist_start}, select: {select - mk_geoids}, combine: {combine - select}, divide: {divide - combine}, "
-        )
-    return result
-
-
 def solve_with_tracts():
     FORMAT = "%(levelname)s %(name)s %(asctime)-15s %(filename)s:%(lineno)d %(message)s"
     logging.basicConfig(format=FORMAT)
@@ -234,7 +212,6 @@ def run_lp(
 
     # as close as possible to input assignment
     h.minimize(sum(abs_diff[i][j] for i in range(d) for j in range(n)))
-    # h.minimize(highest_pop - lowest_pop)
 
     if h.getModelStatus() == highspy.HighsModelStatus.kInfeasible:
         print("sol infeasible")
