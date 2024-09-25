@@ -60,28 +60,6 @@ def shp_from_assign(gdf, col):
     plt.show()
 
 
-def objective(
-    x: list[list[bool]], ind_to_geoid: dict[int, int], tracts: list[gpd.GeoDataFrame]
-):
-    result = 0
-    for district in x:
-        dist_start = time.perf_counter() * 1000
-        geoid_list = [
-            ind_to_geoid[i] for i, included in enumerate(district) if included
-        ]
-        mk_geoids = time.perf_counter() * 1000
-        selected_tracts = tracts[tracts.index.isin(geoid_list)]
-        select = time.perf_counter() * 1000
-        combined_geometry = unary_union(selected_tracts.geometry)
-        combine = time.perf_counter() * 1000
-        result += combined_geometry.area / combined_geometry.convex_hull.area
-        divide = time.perf_counter() * 1000
-        print(
-            f"total: {divide - dist_start} mk_geoids: {mk_geoids - dist_start}, select: {select - mk_geoids}, combine: {combine - select}, divide: {divide - combine}, "
-        )
-    return result
-
-
 def solve_with_tracts():
     FORMAT = "%(levelname)s %(name)s %(asctime)-15s %(filename)s:%(lineno)d %(message)s"
     logging.basicConfig(format=FORMAT)
@@ -266,7 +244,7 @@ def run_lp(
     return (solution, fit)
 
 
-def test_grid(width, height, population, num_districts):
+def test_grid(width: int, height: int, population: list[int], num_districts: int, pop_constr: bool):
     def make_cell(i):
         row = i / width
         col = i % height
@@ -301,6 +279,8 @@ def test_grid(width, height, population, num_districts):
         NUM_THREADS,
     )
 
+    pop_thresh = num_districts / sum(population) if pop_constr else POP_THRESH
+
     (assignment, _) = run_lp(
         assignment,
         adj,
@@ -308,7 +288,7 @@ def test_grid(width, height, population, num_districts):
         num_districts,
         width,
         height,
-        POP_THRESH,
+        pop_thresh,
     )
 
     annealer = AnnealerService(
@@ -317,12 +297,12 @@ def test_grid(width, height, population, num_districts):
         cells,
         num_districts,
         population,
-        POP_THRESH,
-        False,
+        pop_thresh,
+        pop_constr,
         T0,
     )
     hist: list[tuple[list[float], float]] = []
-    for i in range(10):
+    for i in range(5):
         (assignment, anneal_cycle_hist) = annealer.anneal(
             assignment, 100, NUM_THREADS
         )
@@ -343,7 +323,7 @@ def test_grid(width, height, population, num_districts):
     return (assignment, hist)
 
 
-def fetch_grid_data(width: int, height: int, num_districts: int, path: str, use_precalculated: bool):
+def fetch_grid_data(width: int, height: int, num_districts: int, pop_constr: bool, path: str, use_precalculated: bool):
     path_exists = os.path.exists(path)
     if path_exists and use_precalculated:
         with open(path, "r") as f:
@@ -356,7 +336,7 @@ def fetch_grid_data(width: int, height: int, num_districts: int, path: str, use_
     if not use_precalculated or not path_exists:
         rand_pop = [round(random.gauss(10, 2)) for _ in range(width * height)]
         print(rand_pop)
-        assignment, hist = test_grid(width, height, rand_pop, num_districts)
+        assignment, hist = test_grid(width, height, rand_pop, num_districts, pop_constr)
         with open(path, "w") as f:
             data_json = {
                 "assignment": assignment,
@@ -370,8 +350,17 @@ def fetch_grid_data(width: int, height: int, num_districts: int, path: str, use_
 
 
 if __name__ == "__main__":
-    side = 10
-    assignment, hist = fetch_grid_data(side, side, 3, "../data/solutions.json", False)
+    for path, width, height, d in [
+        ("../data/solutions2", 10, 15, 4),
+        ("../data/solutions3", 5, 20, 2),
+        ("../data/solutions4", 10, 10, 10),
+    ]:
+        assignment, hist = fetch_grid_data(
+            width, height, d, True, path + "_pop_constr.json", True
+        )
+        assignment, hist = fetch_grid_data(
+            width, height, d, True, path + "_pop_obj.json", True
+        )
 
     sim_annealer_history = []
     mlp_fit_indices = []
