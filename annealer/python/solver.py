@@ -1,15 +1,11 @@
 import json
 import logging
-import numpy as np
 import os
 import random
-import time
 
 import geopandas as gpd
 import highspy
-import numpy as np
 import matplotlib.pyplot as plt
-from shapely import unary_union
 
 from annealer import AnnealerService, init_precinct
 
@@ -347,8 +343,14 @@ def fetch_grid_data(width: int, height: int, num_districts: int, path: str, use_
 
 
 if __name__ == "__main__":
-    side = 10
-    assignment, hist = fetch_grid_data(side, side, 3, "../data/solutions.json", False)
+    for (path, width, height, d) in [
+            ("../data/solutions0.json", 20, 15, 6),
+            ("../data/solutions1.json", 20, 15, 9),
+            ("../data/solutions2.json", 20, 15, 4),
+            ("../data/solutions3.json", 5, 30, 2),
+            ("../data/solutions4.json", 10, 10,10),
+            ]:
+        assignment, hist = fetch_grid_data(width, height, d,path, True)
 
     sim_annealer_history = []
     mlp_fit_indices = []
