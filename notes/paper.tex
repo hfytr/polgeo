@@ -1,10 +1,12 @@
 \documentclass{article}
 \usepackage{hyperref}
 \usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage[a4paper, margin=1in]{geometry}
 
-\title{Optimal Population Redistricting by Combining Linear Programming with Heuristic Optimizers.}
+\title{Optimal Population Redistricting by Combining Linear Programming with Simulated Annealing.}
 \author{Archim Jhunjhunwala}
-\date{July 2024}
+\date{August 2024}
 
 \begin{document}
 \newcommand\scr[1]{\mathcal{#1}}
@@ -12,73 +14,187 @@
 \maketitle
 
 \section{Introduction}
-Gerrymandering is the practice of manipulating voting districts in order to have some control over the result of an election. Many legislatures have tried to take action against this by requiring districts to be "compact," with little to no precise definition. Here we attempt to create a "compact" districting scheme using a dual annealing approach.
-
+Gerrymandering is the practice of manipulating voting districts in order to
+have some control over the result of an election. Many legislatures have tried
+to take action against this by requiring districts to be "compact," with little
+to no precise definition. Here we attempt to create a "compact" districting
+scheme using a dual annealing approach.
 
 \section{Problem Definition}
 
-Let us assume a given region $R$ which is partitioned into a set of rectangular subregions (precincts) $R_1, \ldots, R_n$. Each subregion $R_j$ has an associated population $w_j$ which is also given to us. The total population is given by $W = w_1 + \cdots + w_n$. The redistricting problem requires us to assign the given $n$ subregions to $k \ll n$ districts wherein each district $\scr{C}_i$ is a union of the corresponding rectangles $R_{i,1}, \ldots, R_{i,l}$ that are assigned to the $i^{th}$ district.
+Let us assume a given region $R$ which is partitioned into a set of rectangular
+subregions (precincts) $R_1, \ldots, R_n$. Each subregion $R_j$ has an
+associated population $w_j$ which is also given to us. The total population is
+given by $W = w_1 + \cdots + w_n$. The redistricting problem requires us to
+assign the given $n$ subregions to $k \ll n$ districts wherein each district
+$\scr{C}_i$ is a union of the corresponding rectangles $R_{i,1}, \ldots,
+	R_{i,l}$ that are assigned to the $i^{th}$ district.
 \begin{itemize}
-\item The population assigned to each district $\scr{C}_j$ cannot be ``too far off'' from the average population: 
-\[  (1 - \epsilon) \frac{W}{k} \leq \sum_{R_i \in \scr{C}_j} w_i \leq (1 + \epsilon) \frac{W}{k}  \,,\]
-wherein $\epsilon \in (0.01, 1)$ is a given tolerance fraction.
-\item Each congressional district must be connected.
-\item The ``compactness'' parameter for each district must be minimized, wherein compactness is measured using a black-box score that is given to us as a function $c$ that maps a proposed congressional district to a score in $[0.01, 1]$, smaller score being better.
+	\item The population assigned to each district $\scr{C}_j$ cannot be ``too far off''
+	      from the average population:
+	      \[  (1 - \epsilon) \frac{W}{k} \leq \sum_{R_i \in \scr{C}_j} w_i \leq (1 + \epsilon) \frac{W}{k}  \,,\]
+	      wherein $\epsilon \in (0.01, 1)$ is a given tolerance fraction.
+	\item Each congressional district must be connected.
+	\item The ``compactness'' parameter for each district must be minimized, wherein
+	      compactness is measured using a black-box score that is given to us as a
+	      function $c$ that maps a proposed congressional district to a score in $[0.01,
+				      1]$, smaller score being better.
 \end{itemize}
 
 \section{Objective}
-We trained several models to predict "compactness" of political districts (\href{https://github.com/aaronrkaufman/compactness}{Data Link}). The dataset consisted of (district, rank) pairs. Rank in the dataset was decided by 6 groups of individuals ranking sets of 100 districts from 1 - 100. These individuals were judges, and public officials responsible for redistricting. Districts in the dataset were chosen from Congressional districts, State Congress Upper Chamber districts, and State Congress Lower Chamber districts.
+We trained several models to predict "compactness" of political districts
+(\href{https://github.com/aaronrkaufman/compactness}{Data Link}). The dataset
+consisted of (district, rank) pairs. Rank in the dataset was decided by 6
+groups of individuals ranking sets of 100 districts from 1 - 100. These
+individuals were judges, and public officials responsible for redistricting.
+Districts in the dataset were chosen from Congressional districts, State
+Congress Upper Chamber districts, and State Congress Lower Chamber districts.
 
 \subsection{Raster}
-In this model, we created a rasterizer which for a given district $D$, height $h$, width $w$, and sampling size $s$, produces a matrix $A\in R_{(h, w)}$ where $A$ is found by the following: Find the minimum bounding rectangle $R$ of $D$, which has width $w_R$, and height $h_R$. Subdivide $R$ into uniform rectangular cells. This grid should have dimension (in cells) of $h\times w$. For the cell at row $i\in[0, h)$, and column $j\in[0, w)$, the bottom left point is located at $P_{bl}=(i\frac{w_R}{w}, j\frac{h_R}{h})$, and the top left corner is located at $P_{tr}=((i+1)\frac{w_R}{w}, (j+1)\frac{h_R}{h})$. Sample $s$ random points $(x_i, y_i)$ where $x_i\in [P_{bl, x}, P_{tr, x}], y_i\in [P_{bl, y}, P_{tr, y}]$. Then $A_{i, j}$ is the fraction of these points which fall in the district.
+In this model, we created a rasterizer which for a given district $D$, height
+$h$, width $w$, and sampling size $s$, produces a matrix $A\in R_{(h, w)}$
+where $A$ is found by the following: Find the minimum bounding rectangle $R$ of
+$D$, which has width $w_R$, and height $h_R$. Subdivide $R$ into uniform
+rectangular cells. This grid should have dimension (in cells) of $h\times w$.
+For the cell at row $i\in[0, h)$, and column $j\in[0, w)$, the bottom left
+point is located at $P_{bl}=(i\frac{w_R}{w}, j\frac{h_R}{h})$, and the top left
+corner is located at $P_{tr}=((i+1)\frac{w_R}{w}, (j+1)\frac{h_R}{h})$. Sample
+$s$ random points $(x_i, y_i)$ where $x_i\in [P_{bl, x}, P_{tr, x}], y_i\in
+	[P_{bl, y}, P_{tr, y}]$. Then $A_{i, j}$ is the fraction of these points which
+fall in the district.
 
-When creating our districting scheme, we set $w=30, h=30, s=100$. Using this data, we trained a convolutional neural network (CNN) with 4 layers, and the sigmoid activation on all layers. With this we were unable to achieve relative error below 20 even on training data. We also tried a support vector regressor (SVR) with even poorer results.
+When creating our districting scheme, we set $w=30, h=30, s=100$. Using this
+data, we trained a convolutional neural network (CNN) with 4 layers, and the
+sigmoid activation on all layers. With this we were unable to achieve relative
+error below 20 even on training data. We also tried a support vector regressor
+(SVR) with even poorer results.
 
 \subsection{Geometric Scores}
-In this model, we created a neural network with the following inputs: consider a district $D$ which is an arbitrary 2-dimensional shape with perimeter $P$, and area $A$. We used the following functions of $D$ as inputs to a neural network
+In this model, we created a neural network with the following inputs: consider
+a district $D$ which is an arbitrary 2-dimensional shape with perimeter $P$,
+and area $A$. We used the following functions of $D$ as inputs to a neural
+network
 \begin{itemize}
-\item Length-Width Ratio: Find the minimum bounding rectangle $R$ of $D$, with length $L$, and width $W$. The Length-Width Ratio is defined by$f(L, W) = max(\frac{L}{W}, \frac{W}{L})$. This metric ranges from 1 (ideal) to $\inf$ (worst)
-\item Convex-Hull: Find the convex hull $C$ of $D$, with area $A_C$. The Convex-Hull metric is defined by $f(A_C, A) = A / A_C$. This metric ranges from 0 (worst) to 1 (ideal).
-\item Reock: Find the circumscribed circle $C$ of $D$, with area $A_C$. The Reock metric is defined by $f(A_C, A) = A / A_C$. This metric ranges from 0 (worst) to 1 (ideal).
-\item Polsby-Popper: Find the circle $C$ with perimeter $P$, and let its area be $A_C$. The Polsby-Popper metric is defined by $f(A_C, A) = A / A_C$. This metric ranges from 0 (worst) to 1 (ideal).
+	\item Length-Width Ratio: Find the minimum bounding rectangle $R$ of $D$, with length
+	      $L$, and width $W$. The Length-Width Ratio is defined by$f(L, W) =
+		      max(\frac{L}{W}, \frac{W}{L})$. This metric ranges from 1 (ideal) to $\inf$
+	      (worst)
+	\item Convex-Hull: Find the convex hull $C$ of $D$, with area $A_C$. The Convex-Hull
+	      metric is defined by $f(A_C, A) = A / A_C$. This metric ranges from 0 (worst)
+	      to 1 (ideal).
+	\item Reock: Find the circumscribed circle $C$ of $D$, with area $A_C$. The Reock
+	      metric is defined by $f(A_C, A) = A / A_C$. This metric ranges from 0 (worst)
+	      to 1 (ideal).
+	\item Polsby-Popper: Find the circle $C$ with perimeter $P$, and let its area be
+	      $A_C$. The Polsby-Popper metric is defined by $f(A_C, A) = A / A_C$. This
+	      metric ranges from 0 (worst) to 1 (ideal).
 \end{itemize}
 
-Using this data, we trained a multi-layer perceptron (MLP), with 7 layers, and the sigmoid activation function on all layers. This model performed similarly poorly, with a relative error of 25\% even on training data. As with the raster data, we tried to use an SVR, but as with the raster, we achieved poorer results than the neural network.
+Using this data, we trained a multi-layer perceptron (MLP), with 7 layers, and
+the sigmoid activation function on all layers. This model performed similarly
+poorly, with a relative error of 25\% even on training data. As with the raster
+data, we tried to use an SVR, but as with the raster, we achieved poorer
+results than the neural network.
 
 \section{Optimiser}
-I am using a dual approach, alternating between a simulated annealing solver, and a mixed integer linear programming solver (MIP). The solver will run the annealer to reach a desirable solution which may not be feasible. Following this, the MIP will find the nearest solution which is feasible, ignoring the objective value. The hope is that this solution will have an objective similar to the solution found by the annealer, and this process can be repeated until the objective value of the solution plateaus. The simulated annealer will run with relaxed population constraints, aiming to optimise the output of a blackbox model (either the raster model, or the geometric scores model).
+I am using a dual approach, alternating between a simulated annealing solver,
+and a mixed integer linear programming solver (MIP). The solver will run the
+annealer to reach a desirable solution which may not be feasible. Following
+this, the MIP will find the nearest solution which is feasible, ignoring the
+objective value. The hope is that this solution will have an objective similar
+to the solution found by the annealer, and this process can be repeated until
+the objective value of the solution plateaus. The simulated annealer will run
+with relaxed population constraints, aiming to optimise the output of a
+blackbox model (either the raster model, or the geometric scores model).
 
 \subsection{Simulated Annealer}
 The simulated annealer takes the following as input:
 \begin{itemize}
-    \item An unweighted, undirected graph $G$ with $N$ nodes, represented by a sequence of sets, where $i\in[0, N)$ is the (arbitrary) index of a node, and $G_i$ is the set of the indices of node $i$'s neighbors. Each each node in the graph is associated with its own geographic area (counties, census tracts, etc.). Nodes corresponding areas do not overlap, and all combined nodes represent the state which is being districted.
-    \item A vector $P$ of the populations of each node. $P$'s elements should be consistent with $G$.
-    \item A districting scheme $S_0$, consisting of $D$ districts, from which to start the search. Districting schemes are simply represented as an (arbitrary) district id number $d, d\in[0..D]$ for each node. Again, $S_0$ follows the indexing scheme of $G$.
-    \item An objective function $o$, which takes a districting scheme (such as $S_0$), and returns $x, x\in\mathbb{R}$, where a lower $x$ value is desirable.
-    % fill in suggested $\beta$ values
-    \item A constant $\beta, \beta\in[0, 1], \beta\in\mathbb{R}$ which represents the strictness with which population balance should be upheld. It is hard for the annealer to satisfy values of $\beta$ - this is the reason for the dual approach - so $\beta$ should at least below $0.6$
+	\item An unweighted, undirected graph $G$ with $N$ nodes, represented by a set of
+	      (from, to) pairs , where $(j,k)\in G$ indicates that there exists an edge from
+	      node $j$ to $k$. Each node in the graph is associated with its own geographic
+	      area (counties, census tracts, etc.). Nodes corresponding areas do not overlap,
+	      and all combined nodes represent the state which is being districted.
+	\item A vector $P$ of the populations of each node. $P$'s elements should be
+	      consistent with the indices used by $G$.
+	\item A districting scheme $S_0$, consisting of $D$ districts, from which to start
+	      the search. Districting schemes are simply represented as an (arbitrary)
+	      district id number $d, d\in[0..D]$ for each node. Again, $S_0$ follows the
+	      indexing scheme of $G$.
+	\item An objective function $o$, which takes a districting scheme (such as $S_0$),
+	      and returns $x, x\in\mathbb{R}$, where a lower $x$ value is desirable.
+	\item A constant $\beta, \beta\in[0, 1]$ which represents the strictness with which
+	      population balance should be upheld. It is hard for the annealer to satisfy
+	      values of $\beta$ - this is the reason for the dual approach - so $\beta$
+	      should at least below $0.6$
 \end{itemize}
-Let $S$ denote the current districting scheme found by the annealer. A single iteration of the simulated annealer involves:
+
+Let $S$ denote the current districting scheme found by the annealer. A single
+iteration of the simulated annealer involves:
 \begin{enumerate}
-    \item The set of border nodes $B=\{x\in[0, N): |\{y\in G_x: S_y\}|\geq2\}$ is calculated for the current state. This is simply the set of all nodes which are adjacent to multiple districts.
-    \item Let the function $u(n, d, S)=$ the state resulting from reassigninig node $n$ to district $d$, in state $S$. Define the set $N = \{u(n, d, S): n \in B, d\in \{S_x: x\in G_n\land S_x\neq S_n\}\}$.
-    \item Define the set $O = \{o(S_n): S_n\in N)\}$
-    \item Recall that we must uphold both population balance, and contiguity. Thus, for a possible child state $S^n$, we should remove it from consideration if it does not meet these constraints: Let $p(d) = \sum_{x\in \{P_i: i\in[0..N)\land S_i=d\}\}}x$, then min$_{d\in[0..D)}p(d)\geq \beta$max$_{d\in[0..D)}p(d)$.
-    \item Calculate the probability's for each possible update according to the temperature softmax function: $P=\{(o): a(o)\in O\}$. Based on these probabilities, randomly select one of the states, and update the $S$.
+	\item The set of border nodes $B=\{x\in[0, N): |\{y\in G_x: S_y\}|\geq2\}$ is
+	      calculated for the current state. This is simply the set of all nodes which are
+	      adjacent to multiple districts.
+	\item Let the function $u(n, d, S)=$ the state resulting from reassigninig node $n$
+	      to district $d$, in state $S$. Define the set $N = \{u(n, d, S): n \in B, d\in
+		      \{S_x: x\in G_n\land S_x\neq S_n\}\}$.
+	\item Define the set $O = \{o(S_n): S_n\in N)\}$
+	\item Recall that we must uphold both population balance, and contiguity. Thus, for a
+	      possible child state $S^n$, we should remove it from consideration if it does
+	      not meet these constraints: Let $p(d) = \sum_{x\in \{P_i: i\in[1,N]\land
+			      S_i=d\}\}}x$, then min$_{d\in[1,D]}p(d)\geq \beta$max$_{d\in[1,D]}p(d)$.
+	\item Calculate the probability's for each possible update according to the
+	      temperature softmax function: $P=\{(o): a(o)\in O\}$. Based on these
+	      probabilities, randomly select one of the states, and update $S$.
 \end{enumerate}
-From $S_0$, the border nodes are calculated.
 
-\subsection{MLP}
-The MLP part of the optimiser takes the same parameters as the simulated annealer. However the value of $\beta$ should be much stricter in this case (at least 0.95), as satisfying a stricter $\beta$ is the entire goal of the MLP. Then, an MLP model is created as follows:
+\subsection{MILP}
+The MILP part of the optimiser takes the same parameters as the simulated
+annealer. However the value of $\beta$ should be much stricter in this case (at
+least 0.95), as satisfying a stricter $\beta$ is the entire goal of the MLP.
+The variables in the MILP are as follows:
 \begin{itemize}
-    \item $DN$ binary decision variables, with each $x_{i,j}$ indicating whether node $i$ is currently assigned to district $j$. Of course, each node can belong to only one district: $\forall n, n\in\mathbb{Z}, n\in[0..N)\sum_{i=0}^dx_{n,i}=1$.
-    \item Decision variables $p_{max}, p_{min}$, representing the population of the most, and least populous districts respectively. They are constrained as $\forall d, d\in[0..D), d\in\mathbb{Z}, p_{max}\geq p(d), p_{min}\leq p(d)$. (recall the population function defined earlier).
-    \item A constant objective, as the goal of the MLP is to find the solution closest to the input which is still feasible.
+	\item Binary variables $d_j \forall j\in[1..N]$ indicating whether node $j$'s
+	      assignment differs from the given starting assignment.
+	\item Binary decision variables $x_{i,j} \forall i\in[1,D], \forall j\in[1,N]$, with
+	      each $x_{i,j}$ indicating whether district $i$ currently contains node $j$.
+	\item Binary variables $w_{i,j} \forall i\in[1,D], \forall j\in[1,N]$, with each
+	      $w_{i,j}$ indicating whether node $j$ is the sink for district $i$.
+	\item Continuous variables $y_{i,j,k} \forall i\in[1..D] \forall j\in[1..N] \forall
+		      (j,k)\in G$, indicating the flow of type $i$ along the directed edge $(j,k)$.
+	\item Continuous variables $p_i\forall i\in[1..D], p_{max}, p_{min}$, representing
+	      the population of the most, and least populous districts respectively.
 \end{itemize}
 
-Districts must also be contiguous, and in our current model, this is not accounted for.
+\begin{align}
+	\min & \ \sum_{j=1}^{N}d_j                                                                                                         \\
+	\text{subject to}
+	     & \ d_j=|a_{i,j}-x_{i,j}|                                               & \ \forall i\in[1,D], \forall j\in[1,N] \tag{1.0}    \\
+	     & \ p_{max} \geq p_i                                                    & \ \forall i\in[1,D] \tag {1.1a}                     \\
+	     & \ p_{min} \leq p_i                                                    & \ \forall i\in[1,D] \tag {1.1b}                     \\
+	     & \ \beta p_{max}\leq p_{min} \tag {1.1c}                                                                                     \\
+	     & \ \sum_{j=1}^N w_{i,j} = 1                                            & \ \forall i\in[1,D] \tag {1.2a}                     \\
+	     & \ w_{i,j} \leq x_{i,j}                                                & \ \forall i\in[1,D], \forall j\in[1,N] \tag {1.2b}  \\
+	     & \ \sum_{j=1}^N x_{i,j} = 1                                            & \ \forall i\in[1,D] \tag {1.2c}                     \\
+	     & \ \sum_{(j,k)\in G}y_{i,j,k} - \sum_{(j,k)\in G}y_{i,k,j} \geq \notag                                                       \\
+	     & \ x_{i,j} - (N-D) * w_{i,j}                                           & \ \forall i\in[1..D], \forall j\in[1,N] \tag {1.3a} \\
+	     & \ y_{i,j,k} \leq x_{i,j} (N-D)                                        & \ \forall i\in[1,D],\forall (j,k)\in G \tag {1.3b}  \\
+	     & \ y_{i,j,k} \leq x_{i,k} (N-D)                                        & \ \forall i\in[1,D],\forall (j,k)\in G \tag {1.3c}
+\end{align}
+
+In (1, 1.0), we minimize the number of changed districts from the starting
+assignment. In (1.1) we impose population constraints. In (1.2), we ensure that
+there is 1 sink per district (a), each sink is in its respective district (b),
+and each node is in only 1 district (c). In (1.3) we ensure contiguity via flow
+constraints, with (b) and (c) simply stating that an edge only has flow if both
+nodes are in the district of the flow. This flow is also bounded by the maximum
+number of nodes in the district: $N-D$. (1.3a) ensures that in non-sinks
+outflow is greater than inflow. If node $j$ is a sink the outflow will be 0,
+and (1.3a) bounds the inflow by the maximum number of nodes in the district.
 
 \section{Languages / Libraries}
-The neural networks, and SVR's were trained using the python packages tensorflow and keras, while both the rasterizer, and the simulated annealer were implemented in rust, with few dependencies.
+The neural networks, and SVR's were trained using the python packages
+tensorflow and keras, while both the rasterizer, and the simulated annealer
+were implemented in rust, with few dependencies.
 
 \end{document}

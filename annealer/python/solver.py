@@ -1,9 +1,13 @@
+import json
 import logging
+import numpy as np
 import os
+import random
 import time
 
 import geopandas as gpd
 import highspy
+import numpy as np
 import matplotlib.pyplot as plt
 from shapely import unary_union
 
@@ -78,7 +82,7 @@ def objective(
     return result
 
 
-def solve():
+def solve_with_tracts():
     FORMAT = "%(levelname)s %(name)s %(asctime)-15s %(filename)s:%(lineno)d %(message)s"
     logging.basicConfig(format=FORMAT)
     logging.getLogger().setLevel(logging.INFO)
@@ -111,7 +115,6 @@ def solve():
     NUM_THREADS = 8
     shp_path = "../data/initial_assign.shp"
     if not os.path.isfile(shp_path):
-        print(tracts.shape)
         initial_assignment = annealer.init_precinct(
             adj_list, population_list, NUM_DISTRICTS, POP_THRESH, NUM_THREADS
         )
@@ -121,7 +124,6 @@ def solve():
                 for node, district in enumerate(initial_assignment)
             }
         )
-        print(tracts.columns)
         tracts.to_file(shp_path)
         shp_from_assign(tracts, "INIT_DISTS")
     else:
@@ -132,14 +134,11 @@ def solve():
             for i in range(len(population_list))
         ]
         shp_from_assign(tracts, "INIT_DISTS")
-        print(tracts.columns)
-        print(tracts["INIT_DISTS"])
 
 
-ANNEAL_POP_THRESH = 0.50
 T0 = 0.1
 INIT_POP_THRESH = 0.01
-POP_THRESH = 0.8
+POP_THRESH = 0.9
 NUM_THREADS = 8
 
 
@@ -153,11 +152,11 @@ def pprint_assignment(assignment: list[int], d: int, width: int, height: int):
     print("\n".join(["".join(gridi) for gridi in grid]))
 
 
-def make_lp(
+def run_lp(
     assignment_raw: list[int],
     adj: list[list[int]],
     populations: list[int],
-    d: _InfoPrinterAbstract,
+    d: int,
     width: int,
     height: int,
     pop_thresh: float,
@@ -200,14 +199,14 @@ def make_lp(
     # one district per node
     for j in range(n):
         h.addConstr(sum(x[i][j] for i in range(d)) == 1)
+    # population balance
+    h.addConstr(highest_pop * pop_thresh <= lowest_pop)
 
     for i in range(d):
         # population constraints
         h.addConstr(district_pops[i] == sum(x[i][j] * populations[j] for j in range(n)))
         h.addConstr(highest_pop >= district_pops[i])
         h.addConstr(lowest_pop <= district_pops[i])
-        # population balance
-        h.addConstr(highest_pop * pop_thresh <= lowest_pop)
 
         # one sink per district
         h.addConstr(sum(w[i][j] for j in range(n)) == 1)
@@ -234,8 +233,8 @@ def make_lp(
                 h.addConstr(y[i][(j, k)] <= x[i][k] * (n - d))
 
     # as close as possible to input assignment
-    # h.minimize(sum(abs_diff[i][j] for i in range(d) for j in range(n)))
-    h.minimize(highest_pop - lowest_pop)
+    h.minimize(sum(abs_diff[i][j] for i in range(d) for j in range(n)))
+    # h.minimize(highest_pop - lowest_pop)
 
     if h.getModelStatus() == highspy.HighsModelStatus.kInfeasible:
         print("sol infeasible")
@@ -261,6 +260,7 @@ def make_lp(
         for j in range(n):
             if bool(round(x[i][j])):
                 solution[j] = i
+    print(fit);
     pprint_assignment(solution, d, width, height)
 
     return (solution, fit)
@@ -297,25 +297,39 @@ def test_grid(width, height, population, num_districts):
         adj,
         population,
         num_districts,
-        ANNEAL_POP_THRESH,
+        INIT_POP_THRESH,
         NUM_THREADS,
     )
+
+    (assignment, _) = run_lp(
+        assignment,
+        adj,
+        population,
+        num_districts,
+        width,
+        height,
+        POP_THRESH,
+    )
+
     annealer = AnnealerService(
         assignment,
         adj,
         cells,
         num_districts,
         population,
-        ANNEAL_POP_THRESH,
+        POP_THRESH,
+        False,
         T0,
     )
     hist: list[tuple[list[float], float]] = []
     for i in range(10):
-        (_, assignment, anneal_cycle_hist) = annealer.anneal(
-            assignment, 10, NUM_THREADS
+        (assignment, anneal_cycle_hist) = annealer.anneal(
+            assignment, 100, NUM_THREADS
         )
+        print(anneal_cycle_hist)
         pprint_assignment(assignment, num_districts, width, height)
-        (assignment, fit) = make_lp(
+        anneal_cycle_hist = [score for _, _, score in anneal_cycle_hist]
+        (assignment, fit) = run_lp(
             assignment,
             adj,
             population,
@@ -329,6 +343,60 @@ def test_grid(width, height, population, num_districts):
     return (assignment, hist)
 
 
+def fetch_grid_data(width: int, height: int, num_districts: int, path: str, use_precalculated: bool):
+    path_exists = os.path.exists(path)
+    if path_exists and use_precalculated:
+        with open(path, "r") as f:
+            data = json.load(f)
+            assignment = data["assignment"]
+            hist = data["hist"]
+            if data["width"] != width or data["height"] != height:
+                use_precalculated = False
+
+    if not use_precalculated or not path_exists:
+        rand_pop = [round(random.gauss(10, 2)) for _ in range(width * height)]
+        print(rand_pop)
+        assignment, hist = test_grid(width, height, rand_pop, num_districts)
+        with open(path, "w") as f:
+            data_json = {
+                "assignment": assignment,
+                "hist": hist,
+                "width": width,
+                "height": height,
+            }
+            json.dump(data_json, f)
+
+    return (assignment, hist)
+
+
 if __name__ == "__main__":
-    side = 6
-    assignment, hist = test_grid(side, side, [i for i in range(side**2)], 2)
+    side = 10
+    assignment, hist = fetch_grid_data(side, side, 3, "../data/solutions.json", False)
+
+    sim_annealer_history = []
+    mlp_fit_indices = []
+    mlp_fits = []
+
+    current_index = 0
+
+    for annealer_history, mlp_fit in hist:
+        sim_annealer_history.extend(annealer_history)
+        mlp_fits.append(mlp_fit)
+        mlp_fit_indices.append(current_index)
+        current_index += len(annealer_history)
+
+    fig, ax1 = plt.subplots()
+    ax1.plot(sim_annealer_history, label="Objective Function", color="blue")
+    ax1.set_xlabel("Iteration")
+    ax1.set_ylabel("Simulated Annealer History", color="blue")
+
+    ax2 = ax1.twinx()
+    ax2.scatter(mlp_fit_indices, mlp_fits, color="red", label="MILP Fit", zorder=5)
+    ax2.set_ylabel("MILP Fit", color="red")
+
+    ax1.tick_params(axis="y", labelcolor="blue")
+    ax2.tick_params(axis="y", labelcolor="red")
+
+    plt.title("Simulated Annealer History with MILP Fit")
+    fig.legend(loc="upper right")
+    plt.show()

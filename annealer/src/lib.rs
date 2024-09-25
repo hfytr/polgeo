@@ -59,7 +59,8 @@ impl AnnealerService {
         geometries: Vec<WrappedPolygon>,
         num_districts: usize,
         population: Vec<usize>,
-        pop_thresh: f32,
+        pop_constant: f32,
+        pop_constraint: bool, // otherwise pop in objective
         t0: f64,
     ) -> PyResult<Self> {
         if adj.len() != precinct_in.len() {
@@ -67,7 +68,7 @@ impl AnnealerService {
                 "adj.len() != precinct_in.len",
             )));
         }
-        let temperature = move |x: f64| (x * (-t0) as f64).max(0.5);
+        let temperature = move |x: f64| (x * t0 as f64);
 
         let objective = move |assignment: &[usize]| {
             let mut districts = vec![
@@ -83,10 +84,26 @@ impl AnnealerService {
                     districts[district].union(&MultiPolygon::new(vec![(geometry.clone()).into()]));
             }
 
-            -districts
+            districts
                 .iter()
                 .map(|district| district.convex_hull().unsigned_area() / district.unsigned_area())
                 .sum::<f64>()
+        };
+
+        let objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64> = if pop_constraint {
+            Box::new(objective)
+        } else {
+            let cloned_population = population.clone();
+            Box::new(move |assignment: &[usize]| {
+                let num_districts = num_districts;
+                let mut district_pops = vec![0.0; num_districts];
+                for (node, district) in assignment.iter().enumerate() {
+                    district_pops[*district] += cloned_population[node] as f32;
+                }
+                let p_avg = district_pops.iter().sum::<f32>() / num_districts as f32;
+                objective(assignment)
+                    + (pop_constant * district_pops.iter().map(|p| p - p_avg).sum::<f32>()) as f64
+            })
         };
 
         Ok(Self {
@@ -95,8 +112,9 @@ impl AnnealerService {
                 adj,
                 num_districts,
                 population,
-                pop_thresh,
-                Box::new(objective),
+                pop_constant,
+                pop_constraint,
+                objective,
                 Box::new(temperature),
             ),
         })
@@ -107,7 +125,7 @@ impl AnnealerService {
         starting_state: Vec<usize>,
         num_steps: usize,
         num_threads: u8,
-    ) -> PyResult<(f64, Vec<usize>, Vec<(usize, usize, f64)>)> {
+    ) -> PyResult<(Vec<usize>, Vec<(usize, usize, f64)>)> {
         self.annealer.set_state(starting_state);
         Ok(self.annealer.anneal(num_steps, num_threads))
     }
@@ -143,7 +161,6 @@ mod tests {
 
     const ANNEAL_POP_THRESH: f32 = 0.50;
     const T0: f64 = 0.1;
-    // const INIT_POP_THRESH: f32 = 0.01;
     const NUM_THREADS: u8 = 8;
 
     #[test]
@@ -219,13 +236,13 @@ mod tests {
             num_districts,
             pop,
             ANNEAL_POP_THRESH,
+            true,
             Box::new(objective),
             Box::new(|x| (x * T0).max(0.1)),
         );
 
-        let (final_score, assignment, hist) = annealer.anneal(10, NUM_THREADS);
+        let (assignment, hist) = annealer.anneal(10, NUM_THREADS);
         dbg!(hist);
-        println!("{}", final_score);
         print_grid(&assignment, dim.0);
     }
 

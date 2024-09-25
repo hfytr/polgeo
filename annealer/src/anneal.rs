@@ -11,8 +11,9 @@ pub struct Annealer {
     population: Vec<usize>,
     border_nodes: Vec<usize>,
     hist: Vec<(usize, usize, f64)>,
-    pop_thresh: f32,
+    pop_const: f32,
     num_nodes: usize,
+    pop_constraint: bool,
     objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64>,
     temperature: Box<dyn Send + Sync + Fn(f64) -> f64>,
 }
@@ -46,6 +47,7 @@ impl Annealer {
         num_districts: usize,
         population: Vec<usize>,
         pop_thresh: f32,
+        pop_constraint: bool,
         objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64>,
         temperature: Box<dyn Send + Sync + Fn(f64) -> f64>,
     ) -> Annealer {
@@ -58,9 +60,10 @@ impl Annealer {
             population,
             border_nodes: Vec::new(),
             hist: Vec::new(),
-            pop_thresh,
+            pop_const: pop_thresh,
             objective,
             temperature,
+            pop_constraint,
         };
         annealer.best = annealer.cur_state.clone();
         annealer.border_nodes = annealer.get_border_nodes();
@@ -92,7 +95,7 @@ impl Annealer {
         &mut self,
         num_steps: usize,
         num_threads: u8,
-    ) -> (f64, Vec<usize>, Vec<(usize, usize, f64)>) {
+    ) -> (Vec<usize>, Vec<(usize, usize, f64)>) {
         let mut rand_state = UniformDist::new([0xfda52833df686ae6, 0x7919f78c90a9362c]);
         for step in 0..num_steps {
             let temp = (self.temperature)(step as f64 / num_steps as f64);
@@ -141,7 +144,7 @@ impl Annealer {
             let adjusted = scores
                 .iter()
                 .flatten()
-                .map(|(_, _, x)| (x / temp).exp())
+                .map(|(_, _, x)| ((self.cur_state.0 - x) / temp).exp())
                 .collect_vec();
 
             let sum: f64 = adjusted.iter().fold(0.0, |acc, elem| acc + elem);
@@ -163,11 +166,7 @@ impl Annealer {
             }
         }
 
-        (
-            self.cur_state.0.clone(),
-            self.cur_state.1.clone(),
-            self.hist.clone(),
-        )
+        (self.cur_state.1.clone(), self.hist.clone())
     }
 
     fn get_scores(
@@ -212,9 +211,7 @@ impl Annealer {
         }
     }
 
-    fn feasible(&self, changes: Option<(usize, usize)>) -> bool {
-        let (changed_node, district) = changes.unwrap_or((0, self.cur_state.1[0]));
-
+    fn population_feasible(&self, changed_node: usize, district: usize) -> bool {
         let populations = self.population.iter().enumerate().fold(
             vec![0_usize; self.num_districts],
             |mut acc, (i, elem)| {
@@ -227,11 +224,19 @@ impl Annealer {
                 acc
             },
         );
-        if *populations.iter().max().unwrap() as f32 / *populations.iter().min().unwrap() as f32
-            > 1.0 + self.pop_thresh
-        {
+        return (*populations.iter().max().unwrap() as f32
+            / *populations.iter().min().unwrap() as f32)
+            < 1.0 + self.pop_const;
+    }
+
+    fn feasible(&self, changes: Option<(usize, usize)>) -> bool {
+        let (changed_node, district) = changes.unwrap_or((0, self.cur_state.1[0]));
+
+        if self.pop_constraint && !self.population_feasible(changed_node, district) {
             return false;
         }
+
+        if !self.pop_constraint {}
         // whether we have flood filled a given district
         let mut flood_filled = vec![false; self.num_districts];
         // node district if unvis, else num districts
