@@ -5,13 +5,9 @@ import random
 import re
 
 import geopandas as gpd
-
-<<<<<<< HEAD
 import gurobipy as gp
 import matplotlib.pyplot as plt
 from gurobipy import GRB, quicksum
-
-=======
 
 from annealer import AnnealerService, init_precinct
 
