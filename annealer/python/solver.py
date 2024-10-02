@@ -5,9 +5,13 @@ import random
 import re
 
 import geopandas as gpd
+
+<<<<<<< HEAD
 import gurobipy as gp
 import matplotlib.pyplot as plt
 from gurobipy import GRB, quicksum
+
+=======
 
 from annealer import AnnealerService, init_precinct
 
@@ -252,6 +256,7 @@ def run_lp(
         name="set abs diff if assignment 0",
     )
 
+<<<<<<< HEAD
     m.setObjective(
         quicksum((x[i, j] - assignment[i][j]) ** 2 for i in range(d) for j in range(n)),
         GRB.MINIMIZE,
@@ -277,6 +282,62 @@ def run_lp(
             if int(x[key]):
                 grid[row][col] = str(district)
     return (output_assignment, fit)
+=======
+        # one sink per district
+        h.addConstr(sum(w[i][j] for j in range(n)) == 1)
+
+        for j in range(n):
+            # sink is in district
+            h.addConstr(w[i][j] <= x[i][j])
+
+            # set absolute difference with starting assignment
+            # used for objective
+            if bool(round(assignment[i][j])):
+                h.addConstr(abs_diff[i][j] == 1 - x[i][j])
+            else:
+                h.addConstr(abs_diff[i][j] == x[i][j])
+
+            # net flow constraint
+            h.addConstr(
+                sum(y[i][(j, k)] for k in adj[j]) - sum(y[i][(k, j)] for k in adj[j])
+                >= x[i][j] - (n - d) * w[i][j]
+            )
+            for k in adj[j]:
+                # flow is between nodes of same, correct district
+                h.addConstr(y[i][(j, k)] <= x[i][j] * (n - d))
+                h.addConstr(y[i][(j, k)] <= x[i][k] * (n - d))
+
+    # as close as possible to input assignment
+    h.minimize(sum(abs_diff[i][j] for i in range(d) for j in range(n)))
+    # h.minimize(highest_pop - lowest_pop)
+
+    if h.getModelStatus() == highspy.HighsModelStatus.kInfeasible:
+        print("sol infeasible")
+        exit()
+
+    fit = h.getInfo().objective_function_value
+    values = list(reversed(h.getSolution().col_value))
+
+    # highs doesn't store variable names, so we need to reconstruct from vector
+    highest_pop = values.pop()
+    lowest_pop = values.pop()
+    for i in range(d):
+        district_pops[i] = values.pop()
+        for j in range(n):
+            x[i][j] = values.pop()
+            w[i][j] = values.pop()
+            abs_diff[i][j] = values.pop()
+            for k in adj[j]:
+                y[i][(j, k)] = values.pop()
+
+    solution = [d] * n
+    for i in range(d):
+        for j in range(n):
+            if bool(round(x[i][j])):
+                solution[j] = i
+    print(fit)
+    pprint_assignment(solution, d, width, height)
+>>>>>>> e6b7e2e (changes)
 
     return (solution, fit)
 
@@ -310,6 +371,9 @@ def test_grid(
 
     adj: list[list[int]] = list(map(cell_adj, range(width * height)))
 
+    pop_thresh = num_districts / sum(population) if not pop_constr else POP_THRESH
+    print(pop_thresh)
+
     assignment = init_precinct(
         adj,
         population,
@@ -339,7 +403,11 @@ def test_grid(
         T0,
     )
     hist: list[tuple[list[float], float]] = []
+<<<<<<< HEAD
     for _ in range(10):
+=======
+    for i in range(5):
+>>>>>>> e6b7e2e (changes)
         (assignment, anneal_cycle_hist) = annealer.anneal(assignment, 100, NUM_THREADS)
         print(anneal_cycle_hist)
         pprint_assignment(assignment, num_districts, width, height)
@@ -399,9 +467,6 @@ if __name__ == "__main__":
     ]:
         assignment, hist = fetch_grid_data(
             width, height, d, True, path + "_pop_constr.json", True
-        )
-        assignment, hist = fetch_grid_data(
-            width, height, d, True, path + "_pop_obj.json", True
         )
 
     sim_annealer_history = []
