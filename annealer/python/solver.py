@@ -1,14 +1,13 @@
 import json
 import logging
-import numpy as np
 import os
 import random
 import time
 
 import geopandas as gpd
 import highspy
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from shapely import unary_union
 
 from annealer import AnnealerService, init_precinct
@@ -238,13 +237,15 @@ def run_lp(
         for j in range(n):
             if bool(round(x[i][j])):
                 solution[j] = i
-    print(fit);
+    print(fit)
     pprint_assignment(solution, d, width, height)
 
     return (solution, fit)
 
 
-def test_grid(width: int, height: int, population: list[int], num_districts: int, pop_constr: bool):
+def test_grid(
+    width: int, height: int, population: list[int], num_districts: int, pop_constr: bool
+):
     def make_cell(i):
         row = i / width
         col = i % height
@@ -271,6 +272,9 @@ def test_grid(width: int, height: int, population: list[int], num_districts: int
 
     adj: list[list[int]] = list(map(cell_adj, range(width * height)))
 
+    pop_thresh = num_districts / sum(population) if not pop_constr else POP_THRESH
+    print(pop_thresh)
+
     assignment = init_precinct(
         adj,
         population,
@@ -278,8 +282,6 @@ def test_grid(width: int, height: int, population: list[int], num_districts: int
         INIT_POP_THRESH,
         NUM_THREADS,
     )
-
-    pop_thresh = num_districts / sum(population) if pop_constr else POP_THRESH
 
     (assignment, _) = run_lp(
         assignment,
@@ -303,9 +305,7 @@ def test_grid(width: int, height: int, population: list[int], num_districts: int
     )
     hist: list[tuple[list[float], float]] = []
     for i in range(5):
-        (assignment, anneal_cycle_hist) = annealer.anneal(
-            assignment, 100, NUM_THREADS
-        )
+        (assignment, anneal_cycle_hist) = annealer.anneal(assignment, 100, NUM_THREADS)
         print(anneal_cycle_hist)
         pprint_assignment(assignment, num_districts, width, height)
         anneal_cycle_hist = [score for _, _, score in anneal_cycle_hist]
@@ -323,7 +323,14 @@ def test_grid(width: int, height: int, population: list[int], num_districts: int
     return (assignment, hist)
 
 
-def fetch_grid_data(width: int, height: int, num_districts: int, pop_constr: bool, path: str, use_precalculated: bool):
+def fetch_grid_data(
+    width: int,
+    height: int,
+    num_districts: int,
+    pop_constr: bool,
+    path: str,
+    use_precalculated: bool,
+):
     path_exists = os.path.exists(path)
     if path_exists and use_precalculated:
         with open(path, "r") as f:
@@ -357,9 +364,6 @@ if __name__ == "__main__":
     ]:
         assignment, hist = fetch_grid_data(
             width, height, d, True, path + "_pop_constr.json", True
-        )
-        assignment, hist = fetch_grid_data(
-            width, height, d, True, path + "_pop_obj.json", True
         )
 
     sim_annealer_history = []
