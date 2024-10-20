@@ -6,6 +6,7 @@ import time
 
 import geopandas as gpd
 import highspy
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 from shapely import unary_union
@@ -114,7 +115,6 @@ def solve_with_tracts():
 
 
 T0 = 0.1
-INIT_POP_THRESH = 0.01
 POP_THRESH = 0.9
 NUM_THREADS = 8
 
@@ -279,7 +279,7 @@ def test_grid(
         adj,
         population,
         num_districts,
-        INIT_POP_THRESH,
+        1.0,
         NUM_THREADS,
     )
 
@@ -290,7 +290,7 @@ def test_grid(
         num_districts,
         width,
         height,
-        pop_thresh,
+        POP_THRESH,
     )
 
     annealer = AnnealerService(
@@ -337,11 +337,9 @@ def fetch_grid_data(
             data = json.load(f)
             assignment = data["assignment"]
             hist = data["hist"]
-            if data["width"] != width or data["height"] != height:
-                use_precalculated = False
 
     if not use_precalculated or not path_exists:
-        rand_pop = [round(random.gauss(10, 2)) for _ in range(width * height)]
+        rand_pop = [abs(round(random.gauss(10, 5))) for _ in range(width * height)]
         print(rand_pop)
         assignment, hist = test_grid(width, height, rand_pop, num_districts, pop_constr)
         with open(path, "w") as f:
@@ -356,15 +354,10 @@ def fetch_grid_data(
     return (assignment, hist)
 
 
-if __name__ == "__main__":
-    for path, width, height, d in [
-        ("../data/solutions2", 10, 15, 4),
-        ("../data/solutions3", 5, 20, 2),
-        ("../data/solutions4", 10, 10, 10),
-    ]:
-        assignment, hist = fetch_grid_data(
-            width, height, d, True, path + "_pop_constr.json", True
-        )
+def plot_path(data_path: str, out_path: str, width: int, height: int):
+    data = json.load(open(data_path))
+    assignment = data["assignment"]
+    hist = data["hist"]
 
     sim_annealer_history = []
     mlp_fit_indices = []
@@ -375,8 +368,8 @@ if __name__ == "__main__":
     for annealer_history, mlp_fit in hist:
         sim_annealer_history.extend(annealer_history)
         mlp_fits.append(mlp_fit)
-        mlp_fit_indices.append(current_index)
         current_index += len(annealer_history)
+        mlp_fit_indices.append(current_index)
 
     fig, ax1 = plt.subplots()
     ax1.plot(sim_annealer_history, label="Objective Function", color="blue")
@@ -392,4 +385,39 @@ if __name__ == "__main__":
 
     plt.title("Simulated Annealer History with MILP Fit")
     fig.legend(loc="upper right")
-    plt.show()
+    plt.savefig(f"{out_path}")
+
+    if len(assignment) != width * height:
+        raise ValueError("The number of assignments must equal width * height")
+
+    grid = np.array(assignment).reshape(height, width)
+    unique_districts = np.unique(assignment)
+    num_districts = len(unique_districts)
+    cmap = plt.get_cmap("tab20", num_districts)
+    norm = mcolors.BoundaryNorm(unique_districts, cmap.N)
+
+    plt.figure(figsize=(width / 2, height / 2))
+    plt.imshow(grid, cmap=cmap, norm=norm, interpolation="none")
+    plt.colorbar(ticks=unique_districts, label="Districts")
+    plt.savefig(f"{out_path}")
+
+
+if __name__ == "__main__":
+    for path, width, height, d in [
+        ("results/solutions2", 10, 15, 4),
+        ("results/solutions3", 5, 20, 2),
+        ("results/solutions4", 10, 10, 10),
+    ]:
+        assignment, hist = fetch_grid_data(
+            width, height, d, True, path + "_pop_constr.json", True
+        )
+
+        assignment, hist = fetch_grid_data(
+            width, height, d, False, path + "_pop_obj.json", True
+        )
+
+        plot_path(path + "_pop_constr.json", path + "_pop_constr.png", width, height)
+        plot_path(path + "_pop_obj.json", path + "_pop_obj.png", width, height)
+
+
+# nix develop --extra-experimental-features "nix-command flakes" --impure

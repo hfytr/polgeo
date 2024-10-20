@@ -19,6 +19,10 @@ impl UniformDist {
         result.0
     }
 
+    pub fn choice<T: Clone>(&mut self, v: &Vec<T>) -> T {
+        v[self.next() as usize % v.len()].clone()
+    }
+
     pub fn new(seed: [u64; 2]) -> UniformDist {
         Self([seed[0], seed[1]])
     }

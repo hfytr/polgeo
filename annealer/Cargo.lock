@@ -30,6 +30,7 @@ dependencies = [
  "geo",
  "itertools 0.13.0",
  "pyo3",
+ "replace_with",
  "serde_json",
  "shapefile",
 ]
@@ -427,6 +428,12 @@ checksum = "2a908a6e00f1fdd0dfd9c0eb08ce85126f6d8bbda50017e74bc4a4b7d4a926a4"
 dependencies = [
  "bitflags",
 ]
+
+[[package]]
+name = "replace_with"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a8614ee435691de62bcffcf4a66d91b3594bf1428a5722e79103249a095690"
 
 [[package]]
 name = "robust"
