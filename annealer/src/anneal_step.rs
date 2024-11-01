@@ -1,5 +1,5 @@
-use crate::rand::UniformDist;
 use crate::Annealer;
+use crate::RANDOM;
 use itertools::Itertools;
 use std::fmt::Debug;
 
@@ -159,12 +159,30 @@ struct SegTreeNode {
 struct SegTree {
     root: usize,
     nodes: Vec<SegTreeNode>,
+    mapping: (Vec<usize>, Vec<Option<usize>>),
 }
 
 impl SegTree {
-    fn wilson(adj: &Vec<Vec<usize>>, populations: &Vec<usize>) -> SegTree {
-        let num_nodes = adj.len();
-        let mut random = UniformDist::new([0xe5abe6887644d843, 0x0b4a2dda403a5e4d]);
+    fn wilson(adj: &Vec<Vec<usize>>, populations: &Vec<usize>, mask: Vec<bool>) -> SegTree {
+        let mut idx = -1;
+        let mapping = (
+            mask.iter()
+                .enumerate()
+                .filter(|(_, x)| **x)
+                .map(|(i, _)| i)
+                .collect_vec(),
+            mask.iter()
+                .map(|x| {
+                    x.then(|| {
+                        idx += 1;
+                        idx as usize
+                    })
+                })
+                .collect_vec(),
+        );
+        let num_nodes = mapping.0.len();
+
+        let mut random = RANDOM.lock().unwrap();
         let root = random.next() as usize % num_nodes;
         let mut nodes = (0..num_nodes).map(|_| SegTreeNode::default()).collect_vec();
         let mut vis = vec![false; num_nodes];
@@ -174,12 +192,15 @@ impl SegTree {
         while nodes_left > 0 {
             let mut walk_vis = vec![None; num_nodes];
             let walk_start = random.next() as usize % nodes_left;
-            let mut i = 0;
-            let mut frontier = 0;
-            while i < walk_start {
-                frontier += 1;
-                if !vis[frontier] {
-                    i += 1;
+            let mut unvis = 0;
+            let mut frontier = vis.len();
+            for (i, vis_i) in vis.iter().enumerate() {
+                if !vis_i {
+                    unvis += 1;
+                }
+                if unvis > walk_start {
+                    frontier = i;
+                    break;
                 }
             }
 
@@ -203,30 +224,35 @@ impl SegTree {
                         cur = loop_prev;
                     }
                 }
-                let next = random.choice(&adj[frontier]);
+                let next = *random.choice(&adj[frontier].iter().filter(|x| mask[**x]).collect());
                 walk_vis[next] = Some(frontier);
                 frontier = next;
             }
         }
 
-        Self::node_populations(&mut nodes, populations, root);
+        Self::node_populations(&mut nodes, populations, &mapping.0, root);
         Self::node_index(&mut nodes, root);
 
-        SegTree { root, nodes }
+        SegTree {
+            root,
+            nodes,
+            mapping,
+        }
     }
 
     fn node_populations(
         nodes: &mut Vec<SegTreeNode>,
         population: &Vec<usize>,
+        mapping: &Vec<usize>,
         node: usize,
     ) -> usize {
         nodes[node].population = nodes[node]
             .children
             .clone()
             .iter()
-            .map(|&child| Self::node_populations(nodes, population, child))
+            .map(|&child| Self::node_populations(nodes, population, mapping, child))
             .sum::<usize>()
-            + population[node];
+            + population[mapping[node]];
         nodes[node].population
     }
 
@@ -259,7 +285,7 @@ impl RecomStrategy {
         adj: &Vec<Vec<usize>>,
         num_districts: usize,
     ) -> (usize, usize) {
-        let mut random = UniformDist::new([0xe125793adf7617c2, 0x241d1623a7a207c7]);
+        let mut random = RANDOM.lock().unwrap();
         let district1 = random.next() as usize % num_districts;
         let district2 = random.choice(
             &cur_state
@@ -279,26 +305,35 @@ impl StepStrategy for RecomStrategy {
     type Step = RecomStep;
 
     fn init(annealer: &Annealer<Self>) -> Self {
+        let districts =
+            Self::random_districts(&annealer.cur_state.1, &annealer.adj, annealer.num_districts);
         RecomStrategy {
-            seg_tree: SegTree::wilson(&annealer.adj, &annealer.population),
-            districts: Self::random_districts(
-                &annealer.cur_state.1,
+            seg_tree: SegTree::wilson(
                 &annealer.adj,
-                annealer.num_districts,
+                &annealer.population,
+                annealer
+                    .cur_state
+                    .1
+                    .iter()
+                    .map(|x| *x == districts.0 || *x == districts.1)
+                    .collect(),
             ),
+            districts,
             pop_const: annealer.pop_const,
         }
     }
 
     fn index(&self, cur_assignment: &Vec<usize>, step: &Self::Step, i: usize) -> usize {
-        if cur_assignment[i] != self.districts.0 && cur_assignment[i] != self.districts.1 {
-            cur_assignment[i]
-        } else if (self.seg_tree.nodes[*step].index.0..=self.seg_tree.nodes[*step].index.1)
-            .contains(&self.seg_tree.nodes[i].index.1)
-        {
-            self.districts.0
+        if let Some(im) = self.seg_tree.mapping.1[i] {
+            if (self.seg_tree.nodes[*step].index.0..=self.seg_tree.nodes[*step].index.1)
+                .contains(&self.seg_tree.nodes[im].index.1)
+            {
+                self.districts.0
+            } else {
+                self.districts.1
+            }
         } else {
-            self.districts.1
+            cur_assignment[i]
         }
     }
 
@@ -310,12 +345,20 @@ impl StepStrategy for RecomStrategy {
         num_districts: usize,
         _: &Self::Step,
     ) {
-        self.seg_tree = SegTree::wilson(adj, populations);
         self.districts = Self::random_districts(cur_state, adj, num_districts);
+        self.seg_tree = SegTree::wilson(
+            adj,
+            populations,
+            cur_state
+                .iter()
+                .map(|x| *x == self.districts.0 || *x == self.districts.1)
+                .collect(),
+        );
     }
 
     fn next_states(&self, annealer: &Annealer<Self>) -> Vec<Self::Step> {
         if !annealer.pop_constraint {
+            // step doesn't need to be mapped
             return (0..(self.seg_tree.root - 1)).collect_vec();
         }
 
@@ -329,10 +372,7 @@ impl StepStrategy for RecomStrategy {
                 .population
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| {
-                    annealer.cur_state.1[*i] != self.districts.0
-                        && annealer.cur_state.1[*i] != self.districts.1
-                })
+                .filter(|(i, _)| self.seg_tree.mapping.1[*i].is_none())
                 .fold(
                     vec![0_usize; annealer.num_districts],
                     |mut acc, (i, elem)| {
@@ -364,9 +404,17 @@ impl StepStrategy for RecomStrategy {
                 .max(node.population)
                 .max(self.seg_tree.nodes[self.seg_tree.root].population - node.population);
 
-            if (max_pop as f32 / min_pop as f32) < (1.0 + self.pop_const) {
+            dbg!(max_pop);
+            dbg!(min_pop);
+            dbg!(node.population);
+
+            if (max_pop as f32) * self.pop_const <= min_pop as f32 {
                 result.push(i);
             }
+        }
+
+        if result.len() == 0 {
+            dbg!(&self.seg_tree);
         }
         result
     }

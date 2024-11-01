@@ -23,7 +23,7 @@ impl UniformDist {
         v[self.next() as usize % v.len()].clone()
     }
 
-    pub fn new(seed: [u64; 2]) -> UniformDist {
+    pub const fn new(seed: [u64; 2]) -> UniformDist {
         Self([seed[0], seed[1]])
     }
 }

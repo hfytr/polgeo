@@ -1,5 +1,6 @@
 use crate::anneal_step::StepStrategy;
-use crate::rand::{UniformDist, MAX};
+use crate::rand::MAX;
+use crate::RANDOM;
 use itertools::Itertools;
 use std::fmt::Debug;
 use std::thread;
@@ -68,11 +69,12 @@ impl<S: StepStrategy> Annealer<S> {
     }
 
     pub fn anneal(&mut self, num_steps: usize, num_threads: u8) -> (Vec<usize>, Vec<f64>) {
-        let mut rand_state = UniformDist::new([0xfda52833df686ae6, 0x7919f78c90a9362c]);
         for step in 0..num_steps {
             let temp = (self.temperature)(step as f64 / num_steps as f64);
             let feasible_moves = self.stepper.next_states(&self);
+            dbg!(&feasible_moves);
 
+            crate::print_grid(&self.cur_state.1, 4);
             let num_feasible = feasible_moves.len();
             let chunks = feasible_moves
                 .into_iter()
@@ -118,7 +120,8 @@ impl<S: StepStrategy> Annealer<S> {
                 .zip(adjusted.into_iter())
                 .map(|((score, step), adjusted)| (score, step, adjusted / sum));
 
-            let rand = rand_state.next() as f64 / MAX;
+            dbg!("hi0");
+            let rand = RANDOM.lock().unwrap().next() as f64 / MAX;
             let mut accumulated_probability = 0.0;
             for (score, step, probability) in probabilities.clone() {
                 accumulated_probability += probability;

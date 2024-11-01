@@ -218,9 +218,9 @@ def run_lp(
         exit()
 
     fit = h.getInfo().objective_function_value
+    # highs doesn't store variable names, so we need to reconstruct from vector
     values = list(reversed(h.getSolution().col_value))
 
-    # highs doesn't store variable names, so we need to reconstruct from vector
     highest_pop = values.pop()
     lowest_pop = values.pop()
     for i in range(d):

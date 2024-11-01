@@ -1,4 +1,4 @@
-use crate::rand::UniformDist;
+use crate::RANDOM;
 use std::collections::HashSet;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -31,12 +31,13 @@ pub fn init_precinct_with_threads(
         }));
     }
     while !stop_token.load(Ordering::Relaxed) {}
+    let mut result = None;
     for handle in handles {
         if let Some(x) = handle.join().unwrap() {
-            return x;
+            result = Some(x);
         }
     }
-    panic!("stop token was modified, but no thread returned Some");
+    result.expect("stop token was modified, but no thread returned Some")
 }
 
 fn init_precinct(
@@ -50,10 +51,10 @@ fn init_precinct(
     let num_nodes = population.len();
     let max_pop = total_pop as f32 / (1.0 + (num_districts as f32 - 1.0) / (1.0 + pop_thresh));
     let min_pop = max_pop / (1.0 + pop_thresh);
-    let mut rand_state = UniformDist::new([0xfda52833df686ae6, 0x7919f78c90a9362c]);
     let mut result = Vec::new();
     let mut sol_feasible = false;
     let mut vis;
+    let mut random = RANDOM.lock().unwrap();
 
     while !sol_feasible {
         vis = vec![false; num_nodes];
@@ -65,7 +66,7 @@ fn init_precinct(
         for d in 0..num_districts {
             let mut starter_node = num_nodes;
             while starter_node == num_nodes || vis[starter_node] {
-                starter_node = rand_state.next() as usize % num_nodes;
+                starter_node = random.next() as usize % num_nodes;
             }
             starter_nodes.push(starter_node);
             vis[starter_node] = true;
@@ -93,14 +94,14 @@ fn init_precinct(
                 .iter()
                 .enumerate()
                 .filter(|(_, (_, v))| !v.is_empty())
-                .nth(rand_state.next() as usize % not_dead_end)
+                .nth(random.next() as usize % not_dead_end)
                 .unwrap()
                 .0;
 
             let added_node = *frontier[index]
                 .1
                 .iter()
-                .nth(rand_state.next() as usize % frontier[index].1.len())
+                .nth(random.next() as usize % frontier[index].1.len())
                 .unwrap();
 
             district_pops[index] += population[added_node];
