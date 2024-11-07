@@ -72,9 +72,7 @@ impl<S: StepStrategy> Annealer<S> {
         for step in 0..num_steps {
             let temp = (self.temperature)(step as f64 / num_steps as f64);
             let feasible_moves = self.stepper.next_states(&self);
-            dbg!(&feasible_moves);
 
-            crate::print_grid(&self.cur_state.1, 4);
             let num_feasible = feasible_moves.len();
             let chunks = feasible_moves
                 .into_iter()
@@ -120,7 +118,6 @@ impl<S: StepStrategy> Annealer<S> {
                 .zip(adjusted.into_iter())
                 .map(|((score, step), adjusted)| (score, step, adjusted / sum));
 
-            dbg!("hi0");
             let rand = RANDOM.lock().unwrap().next() as f64 / MAX;
             let mut accumulated_probability = 0.0;
             for (score, step, probability) in probabilities.clone() {

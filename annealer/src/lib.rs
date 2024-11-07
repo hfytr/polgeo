@@ -121,7 +121,7 @@ impl AnnealerService {
                 .sum::<f64>()
         };
 
-        let objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64> = if pop_constraint {
+        let boxed_objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64> = if pop_constraint {
             Box::new(objective)
         } else {
             let cloned_population = population.clone();
@@ -145,7 +145,7 @@ impl AnnealerService {
                 population,
                 pop_constant,
                 pop_constraint,
-                objective,
+                boxed_objective,
                 Box::new(temperature),
             )),
             single_step,
@@ -258,18 +258,26 @@ mod tests {
     #[test]
     fn single_node() {
         const SIDE_LEN: usize = 10;
-        return;
-        test_grid::<SingleNodeStrategy>((SIDE_LEN, SIDE_LEN), vec![1; SIDE_LEN * SIDE_LEN], 2);
+        test_grid::<SingleNodeStrategy>(
+            (SIDE_LEN, SIDE_LEN),
+            vec![1; SIDE_LEN * SIDE_LEN],
+            2,
+            true,
+        );
     }
 
     #[test]
     fn recom() {
         const SIDE_LEN: usize = 4;
-        return;
-        test_grid::<RecomStrategy>((SIDE_LEN, SIDE_LEN), vec![1; SIDE_LEN * SIDE_LEN], 2);
+        test_grid::<RecomStrategy>((SIDE_LEN, SIDE_LEN), vec![1; SIDE_LEN * SIDE_LEN], 2, false);
     }
 
-    fn test_grid<S: StepStrategy>(dim: (usize, usize), pop: Vec<usize>, num_districts: usize) {
+    fn test_grid<S: StepStrategy>(
+        dim: (usize, usize),
+        pop: Vec<usize>,
+        num_districts: usize,
+        pop_constraint: bool,
+    ) {
         let cells = (0..dim.0 * dim.1)
             .map(|i| {
                 let row = (i / dim.0) as f64;
@@ -313,15 +321,33 @@ mod tests {
                 num_districts
             ];
 
-            for (cell, &district) in cells.iter().zip(assignment.iter()) {
+            for (geometry, &district) in cells.iter().zip(assignment.iter()) {
                 districts[district] =
-                    districts[district].union(&MultiPolygon::new(vec![cell.clone()]));
+                    districts[district].union(&MultiPolygon::new(vec![(geometry.clone()).into()]));
             }
 
             districts
                 .iter()
                 .map(|district| district.convex_hull().unsigned_area() / district.unsigned_area())
                 .sum::<f64>()
+        };
+
+        let boxed_objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64> = if pop_constraint {
+            Box::new(objective)
+        } else {
+            let cloned_population = pop.clone();
+            let pop_constant = 1.0;
+            Box::new(move |assignment: &[usize]| {
+                let num_districts = num_districts;
+                let mut district_pops = vec![0.0; num_districts];
+                for (node, district) in assignment.iter().enumerate() {
+                    district_pops[*district] += cloned_population[node] as f32;
+                }
+                let p_avg = district_pops.iter().sum::<f32>() / num_districts as f32;
+                objective(assignment)
+                    + (pop_constant * district_pops.iter().map(|p| (p - p_avg).abs()).sum::<f32>())
+                        as f64
+            })
         };
 
         let mut annealer = Annealer::<S>::from_starting_state(
@@ -336,8 +362,8 @@ mod tests {
             num_districts,
             pop,
             ANNEAL_POP_THRESH,
-            true,
-            Box::new(objective),
+            pop_constraint,
+            boxed_objective,
             Box::new(|x| (x * T0).max(0.1)),
         );
 

@@ -2,14 +2,13 @@ import json
 import logging
 import os
 import random
-import time
+import sys
 
 import geopandas as gpd
 import highspy
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
-from shapely import unary_union
 
 from annealer import AnnealerService, init_precinct
 
@@ -119,7 +118,7 @@ POP_THRESH = 0.9
 NUM_THREADS = 8
 
 
-def pprint_assignment(assignment: list[int], d: int, width: int, height: int):
+def pprint_assignment(assignment: list[int], d: int, width: int):
     grid = []
     for i, district in enumerate(assignment):
         if i % width == 0:
@@ -129,7 +128,7 @@ def pprint_assignment(assignment: list[int], d: int, width: int, height: int):
     print("\n".join(["".join(gridi) for gridi in grid]))
 
 
-def run_lp(
+def run_highspy(
     assignment_raw: list[int],
     adj: list[list[int]],
     populations: list[int],
@@ -238,13 +237,194 @@ def run_lp(
             if bool(round(x[i][j])):
                 solution[j] = i
     print(fit)
-    pprint_assignment(solution, d, width, height)
+    pprint_assignment(solution, d, width)
 
     return (solution, fit)
 
 
+def run_gurobi(
+    assignment_raw: list[int],
+    adj: list[list[int]],
+    populations: list[int],
+    d: int,
+    width: int,
+    height: int,
+    pop_thresh: float,
+):
+    m = gp.Model("flow")
+
+    n = len(adj)
+    x = m.addVars(d, n, vtype=GRB.BINARY, name="x")
+    w = m.addVars(d, n, vtype=GRB.BINARY, name="w")
+    abs_diff = m.addVars(d, n, vtype=GRB.BINARY, name="absolute difference")
+    y = m.addVars(
+        [
+            (district, node, int(child))
+            for district in range(d)
+            for node in range(n)
+            for child in adj[node]
+        ],
+        lb=0.0,
+        vtype=GRB.CONTINUOUS,
+        name="y",
+    )
+    district_pops = m.addVars(d, vtype=GRB.INTEGER, name="p", lb=0.0)
+    highest_pop = m.addVar(lb=0.0, vtype=GRB.INTEGER, name="p_max")
+    lowest_pop = m.addVar(lb=0.0, vtype=GRB.INTEGER, name="p_min")
+
+    district_pop_constr = m.addConstrs(
+        (
+            quicksum(x[i, j] * populations[j] for j in range(n)) == district_pops[i]
+            for i in range(d)
+        ),
+        name="set district populations",
+    )
+
+    highest_pop_constr = m.addConstrs(
+        (highest_pop >= district_pops[i] for i in range(d)),
+        name="set highest pop district",
+    )
+
+    lowest_pop_constr = m.addConstrs(
+        (lowest_pop <= district_pops[i] for i in range(d)),
+        name="set lowest pop district",
+    )
+
+    population_balance = m.addConstr(
+        (highest_pop * pop_thresh <= lowest_pop), name="population balance"
+    )
+
+    one_district_per_node = m.addConstrs(
+        (quicksum(x[i, j] for i in range(d)) == 1 for j in range(n)),
+        name="one district per node",
+    )
+
+    sink_in_district = m.addConstrs(
+        (w[i, j] <= x[i, j] for i in range(d) for j in range(n)),
+        name="sink in same district",
+    )
+
+    one_sink_per_district = m.addConstrs(
+        (quicksum(w[i, j] for j in range(n)) == 1 for i in range(d)),
+        name="one sink per district",
+    )
+
+    net_flow = m.addConstrs(
+        (
+            (
+                quicksum(y[i, j, k] for k in adj[j])
+                - quicksum(y[i, k, j] for k in adj[j])
+                >= x[i, j] - (n - d) * w[i, j]
+            )
+            for i in range(d)
+            for j in range(n)
+        ),
+        name="net flow",
+    )
+
+    ubound_outflow = m.addConstrs(
+        (
+            y[i, j, k] <= x[i, j] * (n - d)
+            for i in range(d)
+            for j in range(n)
+            for k in adj[j]
+        ),
+        name="upperbound outflow of node",
+    )
+
+    ubound_inflow = m.addConstrs(
+        (
+            y[i, j, k] <= x[i, k] * (n - d)
+            for i in range(d)
+            for j in range(n)
+            for k in adj[j]
+        ),
+        name="upperbound inflow of node",
+    )
+
+    assignment = [
+        [1 if assignment_raw[j] == i else 0 for j in range(n)] for i in range(d)
+    ]
+
+    bound_abs_diff_1 = m.addConstrs(
+        (
+            abs_diff[i, j] >= x[i, j] - 1
+            for i in range(d)
+            for j in range(n)
+            if bool(int(assignment[i][j]))
+        ),
+        name="set abs diff if assignment 1",
+    )
+
+    bound_abs_diff_0 = m.addConstrs(
+        (
+            abs_diff[i, j] == x[i, j]
+            for i in range(d)
+            for j in range(n)
+            if not bool(int(assignment[i][j]))
+        ),
+        name="set abs diff if assignment 0",
+    )
+
+    m.setObjective(
+        quicksum((x[i, j] - assignment[i][j]) ** 2 for i in range(d) for j in range(n)),
+        GRB.MINIMIZE,
+    )
+    m.optimize()
+    fit = m.ObjVal
+    x = {
+        x.getAttr("VarName"): x.getAttr("X")
+        for x in m.getVars()
+        if x.getAttr("VarName")[0] == "x"
+    }
+    grid = [["" for j in range(width)] for i in range(height)]
+    output_assignment = [d for _ in range(n)]
+    for key in x:
+        regex = re.match(r"x\[(\d+),(\d+)\]", key)
+        if regex:
+            district = int(regex.group(1))
+            index = int(regex.group(2))
+            if int(x[key]):
+                output_assignment[index] = district
+            row = index // width
+            col = index % width
+            if int(x[key]):
+                grid[row][col] = str(district)
+    return (output_assignment, fit)
+
+    return (solution, fit)
+
+
+def run_lp(
+    assignment_raw: list[int],
+    adj: list[list[int]],
+    populations: list[int],
+    d: int,
+    width: int,
+    height: int,
+    pop_thresh: float,
+    solver: str,
+):
+    if solver == "gurobi":
+        return run_gurobi(
+            assignment_raw, adj, populations, d, width, height, pop_thresh
+        )
+    elif solver == "highspy":
+        return run_highspy(
+            assignment_raw, adj, populations, d, width, height, pop_thresh
+        )
+    else:
+        print("invalid solver")
+        exit()
+
+
 def test_grid(
-    width: int, height: int, population: list[int], num_districts: int, pop_constr: bool
+    width: int,
+    height: int,
+    population: list[int],
+    num_districts: int,
+    pop_constr: bool,
+    solver: str,
 ):
     def make_cell(i):
         row = i / width
@@ -284,13 +464,7 @@ def test_grid(
     )
 
     (assignment, _) = run_lp(
-        assignment,
-        adj,
-        population,
-        num_districts,
-        width,
-        height,
-        POP_THRESH,
+        assignment, adj, population, num_districts, width, height, POP_THRESH, solver
     )
 
     annealer = AnnealerService(
@@ -301,14 +475,16 @@ def test_grid(
         population,
         pop_thresh,
         pop_constr,
+        False,
         T0,
     )
     hist: list[tuple[list[float], float]] = []
-    for i in range(5):
-        (assignment, anneal_cycle_hist) = annealer.anneal(assignment, 100, NUM_THREADS)
+    for _ in range(5):
+        (assignment, anneal_cycle_hist) = annealer.anneal(
+            assignment, 100, NUM_THREADS, False
+        )
         print(anneal_cycle_hist)
-        pprint_assignment(assignment, num_districts, width, height)
-        anneal_cycle_hist = [score for _, _, score in anneal_cycle_hist]
+        pprint_assignment(assignment, num_districts, width)
         (assignment, fit) = run_lp(
             assignment,
             adj,
@@ -317,6 +493,7 @@ def test_grid(
             width,
             height,
             POP_THRESH,
+            solver,
         )
         hist.append((anneal_cycle_hist, fit))
 
@@ -341,7 +518,10 @@ def fetch_grid_data(
     if not use_precalculated or not path_exists:
         rand_pop = [abs(round(random.gauss(10, 5))) for _ in range(width * height)]
         print(rand_pop)
-        assignment, hist = test_grid(width, height, rand_pop, num_districts, pop_constr)
+        print(sys.argv)
+        assignment, hist = test_grid(
+            width, height, rand_pop, num_districts, pop_constr, sys.argv[1]
+        )
         with open(path, "w") as f:
             data_json = {
                 "assignment": assignment,
@@ -404,7 +584,7 @@ def plot_path(data_path: str, out_path: str, width: int, height: int):
 
 if __name__ == "__main__":
     for path, width, height, d in [
-        ("results/solutions2", 10, 15, 4),
+        ("results/solutions2", 5, 5, 3),
         ("results/solutions3", 5, 20, 2),
         ("results/solutions4", 10, 10, 10),
     ]:

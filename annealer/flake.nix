@@ -69,6 +69,7 @@
               geopandas
               shapely
               matplotlib
+              gurobipy
               highspy
             ]));
         };
@@ -94,6 +95,7 @@
             maturin
             packages.pythonEnv
             pyright
+            gurobi
             highs
           ];
         };
@@ -112,6 +114,9 @@
             pkg-config
             rustpkg
           ];
+          shellHook = ''
+            export PYO3_PYTHON=${pythonVersion}/bin/python
+          '';
         };
       });
 }
