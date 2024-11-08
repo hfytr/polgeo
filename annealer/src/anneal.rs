@@ -18,7 +18,7 @@ pub struct Annealer<S: StepStrategy> {
     pub pop_const: f32,
     pub pop_constraint: bool,
 
-    hist: Vec<f64>,
+    hist: Vec<(f64, Vec<usize>)>,
     stepper: S,
 }
 
@@ -68,7 +68,11 @@ impl<S: StepStrategy> Annealer<S> {
         self.stepper = S::init(&self);
     }
 
-    pub fn anneal(&mut self, num_steps: usize, num_threads: u8) -> (Vec<usize>, Vec<f64>) {
+    pub fn anneal(
+        &mut self,
+        num_steps: usize,
+        num_threads: u8,
+    ) -> (Vec<usize>, Vec<(f64, Vec<usize>)>) {
         for step in 0..num_steps {
             let temp = (self.temperature)(step as f64 / num_steps as f64);
             let feasible_moves = self.stepper.next_states(&self);
@@ -123,7 +127,6 @@ impl<S: StepStrategy> Annealer<S> {
             for (score, step, probability) in probabilities.clone() {
                 accumulated_probability += probability;
                 if accumulated_probability > rand {
-                    self.hist.push(score);
                     self.stepper.update(
                         &mut self.cur_state.1,
                         &self.adj,
@@ -131,6 +134,11 @@ impl<S: StepStrategy> Annealer<S> {
                         self.num_districts,
                         &step,
                     );
+                    let mut district_pops = vec![0; self.num_districts];
+                    for (node, district) in self.cur_state.1.iter().enumerate() {
+                        district_pops[*district] += self.population[node];
+                    }
+                    self.hist.push((score, district_pops));
                     break;
                 }
             }

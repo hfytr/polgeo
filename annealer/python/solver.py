@@ -2,13 +2,16 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 
 import geopandas as gpd
+import gurobipy as gp
 import highspy
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
+from gurobipy import GRB, quicksum
 
 from annealer import anneal_districts, init_precinct
 
@@ -530,6 +533,7 @@ def fetch_grid_data(
         with open(path, "w") as f:
             data_json = {
                 "assignment": assignment,
+                "populations": rand_pop,
                 "hist": hist,
                 "width": width,
                 "height": height,

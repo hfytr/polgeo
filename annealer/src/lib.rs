@@ -82,7 +82,7 @@ fn anneal_districts(
     pop_constr: bool,
     pop_constant: f32,
     t0: f64,
-) -> PyResult<(Vec<usize>, Vec<f64>)> {
+) -> PyResult<(Vec<usize>, Vec<(f64, Vec<usize>)>)> {
     if adj.len() != starting_state.len() {
         return PyResult::Err(PyErr::new::<PyException, _>(PyException::new_err(
             "adj.len() != precinct_in.len",
