@@ -327,7 +327,6 @@ impl StepStrategy for RecomStrategy {
         for node in 0..cur_state.len() {
             cur_state[node] = self.index(&cur_assignment, step, node);
         }
-        dbg!(&cur_state);
         self.districts = Self::random_districts(cur_state, adj, num_districts);
         self.seg_tree = SegTree::wilson(
             adj,

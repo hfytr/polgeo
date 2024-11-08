@@ -10,7 +10,7 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 
-from annealer import AnnealerService, init_precinct
+from annealer import anneal_districts, init_precinct
 
 
 def get_adj(gdf, unique_col):
@@ -423,8 +423,8 @@ def test_grid(
     height: int,
     population: list[int],
     num_districts: int,
-    pop_constr: bool,
     solver: str,
+    step_plan: list[tuple[bool, bool]],
 ):
     def make_cell(i):
         row = i / width
@@ -452,7 +452,7 @@ def test_grid(
 
     adj: list[list[int]] = list(map(cell_adj, range(width * height)))
 
-    pop_thresh = num_districts / sum(population) if not pop_constr else POP_THRESH
+    pop_thresh = num_districts / sum(population) if not step_plan[0][1] else POP_THRESH
     print(pop_thresh)
 
     assignment = init_precinct(
@@ -467,21 +467,21 @@ def test_grid(
         assignment, adj, population, num_districts, width, height, POP_THRESH, solver
     )
 
-    annealer = AnnealerService(
-        assignment,
-        adj,
-        cells,
-        num_districts,
-        population,
-        pop_thresh,
-        pop_constr,
-        False,
-        T0,
-    )
     hist: list[tuple[list[float], float]] = []
-    for _ in range(5):
-        (assignment, anneal_cycle_hist) = annealer.anneal(
-            assignment, 100, NUM_THREADS, False
+    for pop_constr, single_step in step_plan[1:]:
+        pop_constant = POP_THRESH if pop_constr else num_districts / sum(population)
+        (assignment, anneal_cycle_hist) = anneal_districts(
+            assignment,
+            adj,
+            cells,
+            num_districts,
+            population,
+            100,
+            NUM_THREADS,
+            single_step,
+            pop_constr,
+            pop_constant,
+            T0,
         )
         print(anneal_cycle_hist)
         pprint_assignment(assignment, num_districts, width)
@@ -504,8 +504,10 @@ def fetch_grid_data(
     width: int,
     height: int,
     num_districts: int,
-    pop_constr: bool,
+    pop_mean: int,
+    pop_stdev: int,
     path: str,
+    step_plan: list[tuple[bool, bool]],
     use_precalculated: bool,
 ):
     path_exists = os.path.exists(path)
@@ -516,11 +518,14 @@ def fetch_grid_data(
             hist = data["hist"]
 
     if not use_precalculated or not path_exists:
-        rand_pop = [abs(round(random.gauss(10, 5))) for _ in range(width * height)]
+        rand_pop = [
+            max(5, round(random.gauss(pop_mean, pop_stdev)))
+            for _ in range(width * height)
+        ]
         print(rand_pop)
         print(sys.argv)
         assignment, hist = test_grid(
-            width, height, rand_pop, num_districts, pop_constr, sys.argv[1]
+            width, height, rand_pop, num_districts, sys.argv[1], step_plan
         )
         with open(path, "w") as f:
             data_json = {
@@ -583,21 +588,36 @@ def plot_path(data_path: str, out_path: str, width: int, height: int):
 
 
 if __name__ == "__main__":
-    for path, width, height, d in [
-        ("results/solutions2", 5, 5, 3),
-        ("results/solutions3", 5, 20, 2),
-        ("results/solutions4", 10, 10, 10),
-    ]:
-        assignment, hist = fetch_grid_data(
-            width, height, d, True, path + "_pop_constr.json", True
-        )
-
-        assignment, hist = fetch_grid_data(
-            width, height, d, False, path + "_pop_obj.json", True
-        )
-
-        plot_path(path + "_pop_constr.json", path + "_pop_constr.png", width, height)
-        plot_path(path + "_pop_obj.json", path + "_pop_obj.png", width, height)
+    for i, plan in enumerate(
+        [
+            [(False, True)] + [(False, True)] * 5 + [(True, True)],  # all single step
+            [(False, False)] + [(False, True)] * 5 + [(True, True)],  # start recom
+            [(False, False)]
+            + [(False, False)] * 5
+            + [(True, True)],  # start / middle recom
+        ]
+    ):
+        for path, width, height, d, pop_mean, pop_stdev in [
+            ("results/solutions2", 5, 5, 3, 100, 100),
+            ("results/solutions3", 5, 10, 2, 100, 50),
+            ("results/solutions4", 7, 7, 7, 100, 30),
+        ]:
+            assignment, hist = fetch_grid_data(
+                width,
+                height,
+                d,
+                pop_mean,
+                pop_stdev,
+                f"{path}_plan_{i}.json",
+                plan,
+                False,
+            )
+            plot_path(
+                f"{path}_plan_{i}.json",
+                f"{path}_plan_{i}.png",
+                width,
+                height,
+            )
 
 
 # nix develop --extra-experimental-features "nix-command flakes" --impure

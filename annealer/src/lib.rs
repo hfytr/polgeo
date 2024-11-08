@@ -19,7 +19,7 @@ use geo::{
 };
 use pyo3::{
     exceptions::PyException,
-    pyclass, pyfunction, pymethods, pymodule,
+    pyfunction, pymodule,
     types::{PyAnyMethods, PyModule},
     wrap_pyfunction, Bound, FromPyObject, PyAny, PyErr, PyResult,
 };
@@ -42,17 +42,6 @@ fn print_grid<T: Debug>(a: &Vec<T>, width: usize) {
             print!("\n");
         }
     }
-}
-
-enum NoGenericAnnealer {
-    SingleNode(Annealer<SingleNodeStrategy>),
-    Recom(Annealer<RecomStrategy>),
-}
-
-#[pyclass]
-struct AnnealerService {
-    annealer: NoGenericAnnealer,
-    single_step: bool,
 }
 
 #[derive(Clone)]
@@ -80,146 +69,87 @@ impl<'py> FromPyObject<'py> for WrappedPolygon {
     }
 }
 
-#[pymethods]
-impl AnnealerService {
-    #[new]
-    fn new(
-        precinct_in: Vec<usize>,
-        adj: Vec<Vec<usize>>,
-        geometries: Vec<WrappedPolygon>,
-        num_districts: usize,
-        population: Vec<usize>,
-        pop_constant: f32,
-        pop_constraint: bool, // otherwise pop in objective
-        single_step: bool,
-        t0: f64,
-    ) -> PyResult<Self> {
-        if adj.len() != precinct_in.len() {
-            return PyResult::Err(PyErr::new::<PyException, _>(PyException::new_err(
-                "adj.len() != precinct_in.len",
-            )));
+#[pyfunction]
+fn anneal_districts(
+    starting_state: Vec<usize>,
+    adj: Vec<Vec<usize>>,
+    geometries: Vec<WrappedPolygon>,
+    num_districts: usize,
+    population: Vec<usize>,
+    num_steps: usize,
+    num_threads: u8,
+    single_step: bool,
+    pop_constr: bool,
+    pop_constant: f32,
+    t0: f64,
+) -> PyResult<(Vec<usize>, Vec<f64>)> {
+    if adj.len() != starting_state.len() {
+        return PyResult::Err(PyErr::new::<PyException, _>(PyException::new_err(
+            "adj.len() != precinct_in.len",
+        )));
+    }
+    let temperature = move |x: f64| (x * t0 as f64);
+
+    let base_objective = move |assignment: &[usize]| {
+        let mut districts = vec![
+            MultiPolygon::<f64>::new(vec![Polygon::<f64>::new(
+                LineString::<f64>::from(Vec::<(f64, f64)>::new()),
+                vec![]
+            )]);
+            num_districts
+        ];
+
+        for (geometry, &district) in geometries.iter().zip(assignment.iter()) {
+            districts[district] =
+                districts[district].union(&MultiPolygon::new(vec![(geometry.clone()).into()]));
         }
-        let temperature = move |x: f64| (x * t0 as f64);
 
-        let objective = move |assignment: &[usize]| {
-            let mut districts = vec![
-                MultiPolygon::<f64>::new(vec![Polygon::<f64>::new(
-                    LineString::<f64>::from(Vec::<(f64, f64)>::new()),
-                    vec![]
-                )]);
-                num_districts
-            ];
+        districts
+            .iter()
+            .map(|district| district.convex_hull().unsigned_area() / district.unsigned_area())
+            .sum::<f64>()
+    };
 
-            for (geometry, &district) in geometries.iter().zip(assignment.iter()) {
-                districts[district] =
-                    districts[district].union(&MultiPolygon::new(vec![(geometry.clone()).into()]));
+    let cloned_population = population.clone();
+    let boxed_objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64> = if pop_constr {
+        Box::new(base_objective)
+    } else {
+        Box::new(move |assignment: &[usize]| {
+            let num_districts = num_districts;
+            let mut district_pops = vec![0.0; num_districts];
+            for (node, district) in assignment.iter().enumerate() {
+                district_pops[*district] += cloned_population[node] as f32;
             }
-
-            districts
-                .iter()
-                .map(|district| district.convex_hull().unsigned_area() / district.unsigned_area())
-                .sum::<f64>()
-        };
-
-        let boxed_objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64> = if pop_constraint {
-            Box::new(objective)
-        } else {
-            let cloned_population = population.clone();
-            Box::new(move |assignment: &[usize]| {
-                let num_districts = num_districts;
-                let mut district_pops = vec![0.0; num_districts];
-                for (node, district) in assignment.iter().enumerate() {
-                    district_pops[*district] += cloned_population[node] as f32;
-                }
-                let p_avg = district_pops.iter().sum::<f32>() / num_districts as f32;
-                objective(assignment)
-                    + (pop_constant * district_pops.iter().map(|p| p - p_avg).sum::<f32>()) as f64
-            })
-        };
-
-        Ok(Self {
-            annealer: NoGenericAnnealer::SingleNode(anneal::Annealer::from_starting_state(
-                precinct_in,
-                adj,
-                num_districts,
-                population,
-                pop_constant,
-                pop_constraint,
-                boxed_objective,
-                Box::new(temperature),
-            )),
-            single_step,
+            let p_avg = district_pops.iter().sum::<f32>() / num_districts as f32;
+            base_objective(assignment)
+                + (pop_constant * district_pops.iter().map(|p| p - p_avg).sum::<f32>()) as f64
         })
-    }
+    };
 
-    fn anneal(
-        &mut self,
-        starting_state: Vec<usize>,
-        num_steps: usize,
-        num_threads: u8,
-        single_step: bool,
-    ) -> PyResult<(Vec<usize>, Vec<f64>)> {
-        let should_reinit = single_step != self.single_step;
-        if should_reinit {
-            self.single_step = single_step;
-            self.annealer.toggle_method();
-        }
-        if let NoGenericAnnealer::Recom(ref mut annealer) = self.annealer {
-            annealer.set_state(starting_state);
-            PyResult::Ok(annealer.anneal(num_steps, num_threads))
-        } else if let NoGenericAnnealer::SingleNode(ref mut annealer) = self.annealer {
-            annealer.set_state(starting_state);
-            PyResult::Ok(annealer.anneal(num_steps, num_threads))
-        } else {
-            unreachable!()
-        }
-    }
-}
-
-impl NoGenericAnnealer {
-    fn toggle_method(&mut self) {
-        replace_with::replace_with_or_abort(self, |self_| match self_ {
-            Self::SingleNode(Annealer {
-                adj,
-                num_districts,
-                objective,
-                temperature,
-                population,
-                pop_const,
-                pop_constraint,
-                cur_state,
-                ..
-            }) => Self::SingleNode(Annealer::<SingleNodeStrategy>::from_starting_state(
-                cur_state.1,
-                adj,
-                num_districts,
-                population,
-                pop_const,
-                pop_constraint,
-                objective,
-                temperature,
-            )),
-            Self::Recom(Annealer {
-                adj,
-                num_districts,
-                objective,
-                temperature,
-                population,
-                pop_const,
-                pop_constraint,
-                cur_state,
-                ..
-            }) => Self::Recom(Annealer::<RecomStrategy>::from_starting_state(
-                cur_state.1,
-                adj.to_vec(),
-                num_districts,
-                population,
-                pop_const,
-                pop_constraint,
-                objective,
-                temperature,
-            )),
-        })
+    if single_step {
+        let mut annealer = anneal::Annealer::<SingleNodeStrategy>::from_starting_state(
+            starting_state,
+            adj,
+            num_districts,
+            population,
+            pop_constant,
+            pop_constr,
+            boxed_objective,
+            Box::new(temperature),
+        );
+        Ok(annealer.anneal(num_steps, num_threads))
+    } else {
+        let mut annealer = anneal::Annealer::<RecomStrategy>::from_starting_state(
+            starting_state,
+            adj,
+            num_districts,
+            population,
+            pop_constant,
+            pop_constr,
+            boxed_objective,
+            Box::new(temperature),
+        );
+        Ok(annealer.anneal(num_steps, num_threads))
     }
 }
 
@@ -236,8 +166,8 @@ fn init_precinct(
 
 #[pymodule]
 fn annealer(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<AnnealerService>()?;
     m.add_function(wrap_pyfunction!(init_precinct, m)?)?;
+    m.add_function(wrap_pyfunction!(anneal_districts, m)?)?;
     Ok(())
 }
 
