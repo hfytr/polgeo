@@ -1,5 +1,4 @@
 shp_raster/target/
 src/__pycache__/
 data/
-notes/latex_out
-notes/latex_aux
+notes/

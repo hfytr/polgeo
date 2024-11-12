@@ -1,4 +1,0 @@
-modifyLineBreaks:
-  blankLinesBetweenEnv: 1
-  textWrapOptions:
-    columns: 80

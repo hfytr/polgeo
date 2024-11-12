@@ -1,7 +1,0 @@
----
-id: Heuristics
-aliases: []
-tags: []
----
-
-
