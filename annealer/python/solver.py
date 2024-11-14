@@ -525,8 +525,6 @@ def fetch_grid_data(
             max(5, round(random.gauss(pop_mean, pop_stdev)))
             for _ in range(width * height)
         ]
-        print(rand_pop)
-        print(sys.argv)
         assignment, hist = test_grid(
             width, height, rand_pop, num_districts, sys.argv[1], step_plan
         )
@@ -616,12 +614,15 @@ if __name__ == "__main__":
                 plan,
                 False,
             )
-            plot_path(
-                f"{path}_plan_{i}.json",
-                f"{path}_plan_{i}.png",
-                width,
-                height,
-            )
+            if "-p" in sys.argv or "--plot" in sys.argv:
+                plot_path(
+                    f"{path}_plan_{i}.json",
+                    f"{path}_plan_{i}.png",
+                    width,
+                    height,
+                )
 
-
-# nix develop --extra-experimental-features "nix-command flakes" --impure
+"""
+export NIXPKGS_ALLOW_UNFREE=1
+nix develop --extra-experimental-features "nix-command flakes" --impure
+"""

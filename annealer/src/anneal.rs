@@ -15,7 +15,7 @@ pub struct Annealer<S: StepStrategy> {
     pub temperature: Box<dyn Send + Sync + Fn(f64) -> f64>,
     pub population: Vec<usize>,
     pub num_districts: usize,
-    pub pop_const: f32,
+    pub pop_const: f64,
     pub pop_constraint: bool,
 
     hist: Vec<(f64, Vec<usize>)>,
@@ -38,7 +38,7 @@ impl<S: StepStrategy> Annealer<S> {
         adj: Vec<Vec<usize>>,
         num_districts: usize,
         population: Vec<usize>,
-        pop_thresh: f32,
+        pop_thresh: f64,
         pop_constraint: bool,
         objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64>,
         temperature: Box<dyn Send + Sync + Fn(f64) -> f64>,
@@ -108,6 +108,12 @@ impl<S: StepStrategy> Annealer<S> {
                     .collect_vec();
             });
 
+            dbg!(scores
+                .iter()
+                .flatten()
+                .map(|(x, _)| (self.cur_state.0 - x))
+                .collect_vec());
+            dbg!(temp);
             let adjusted = scores
                 .iter()
                 .flatten()
@@ -157,14 +163,14 @@ impl<S: StepStrategy> Annealer<S> {
         chunk
             .into_iter()
             .map(|step| {
-                (
-                    objective(
-                        &(0..num_nodes)
-                            .map(|i| stepper.index(&cur_assignment, &step, i))
-                            .collect_vec(),
-                    ),
-                    step,
-                )
+                crate::print_indexer(|i| stepper.index(&cur_assignment, &step, i), 5, 5);
+                let result = objective(
+                    &(0..num_nodes)
+                        .map(|i| stepper.index(&cur_assignment, &step, i))
+                        .collect_vec(),
+                );
+                dbg!(result);
+                (result, step)
             })
             .collect()
     }

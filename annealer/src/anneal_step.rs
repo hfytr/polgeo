@@ -38,8 +38,8 @@ impl SingleNodeStrategy {
                 acc
             },
         );
-        return (*populations.iter().max().unwrap() as f32
-            / *populations.iter().min().unwrap() as f32)
+        return (*populations.iter().max().unwrap() as f64
+            / *populations.iter().min().unwrap() as f64)
             < 1.0 + annealer.pop_const;
     }
 
@@ -223,13 +223,23 @@ impl SegTree {
                         cur = loop_prev;
                     }
                 }
-                let next = *random.choice(&adj[frontier].iter().filter(|x| mask[**x]).collect());
+                let next = mapping.1[*random.choice(
+                    &adj[mapping.0[frontier]]
+                        .iter()
+                        .filter(|x| mask[**x])
+                        .collect(),
+                )]
+                .unwrap();
                 walk_vis[next] = Some(frontier);
                 frontier = next;
             }
         }
 
         Self::node_index(&mut nodes, root);
+
+        dbg!(&root);
+        dbg!(&nodes);
+        dbg!(&mapping);
 
         SegTree {
             root,
@@ -288,6 +298,8 @@ impl StepStrategy for RecomStrategy {
     fn init(annealer: &Annealer<Self>) -> Self {
         let districts =
             Self::random_districts(&annealer.cur_state.1, &annealer.adj, annealer.num_districts);
+        dbg!(&districts);
+        crate::print_grid(&annealer.cur_state.1, 5);
         RecomStrategy {
             seg_tree: SegTree::wilson(
                 &annealer.adj,
@@ -328,6 +340,7 @@ impl StepStrategy for RecomStrategy {
             cur_state[node] = self.index(&cur_assignment, step, node);
         }
         self.districts = Self::random_districts(cur_state, adj, num_districts);
+        crate::print_grid(cur_state, 5);
         self.seg_tree = SegTree::wilson(
             adj,
             cur_state

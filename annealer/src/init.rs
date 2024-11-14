@@ -9,7 +9,7 @@ pub fn init_precinct_with_threads(
     adj: Vec<Vec<usize>>,
     population: Vec<usize>,
     num_districts: usize,
-    pop_thresh: f32,
+    pop_thresh: f64,
     num_threads: u8,
 ) -> Vec<usize> {
     let stop_token = Arc::new(AtomicBool::new(false));
@@ -44,12 +44,12 @@ fn init_precinct(
     adj: Arc<Vec<Vec<usize>>>,
     population: Arc<Vec<usize>>,
     num_districts: usize,
-    pop_thresh: f32,
+    pop_thresh: f64,
     stop_token: Arc<AtomicBool>,
 ) -> Option<Vec<usize>> {
     let total_pop = population.iter().sum::<usize>();
     let num_nodes = population.len();
-    let max_pop = total_pop as f32 / (1.0 + (num_districts as f32 - 1.0) / (1.0 + pop_thresh));
+    let max_pop = total_pop as f64 / (1.0 + (num_districts as f64 - 1.0) / (1.0 + pop_thresh));
     let min_pop = max_pop / (1.0 + pop_thresh);
     let mut result = Vec::new();
     let mut sol_feasible = false;
@@ -119,7 +119,7 @@ fn init_precinct(
             for district in 0..num_districts {
                 frontier[district].1.remove(&added_node);
                 if frontier[district].1.len() == 0
-                    && !(min_pop..max_pop).contains(&(district_pops[district] as f32))
+                    && !(min_pop..max_pop).contains(&(district_pops[district] as f64))
                 {
                     sol_feasible = false;
                 }

@@ -80,7 +80,7 @@ fn anneal_districts(
     num_threads: u8,
     single_step: bool,
     pop_constr: bool,
-    pop_constant: f32,
+    pop_constant: f64,
     t0: f64,
 ) -> PyResult<(Vec<usize>, Vec<(f64, Vec<usize>)>)> {
     if adj.len() != starting_state.len() {
@@ -118,11 +118,11 @@ fn anneal_districts(
             let num_districts = num_districts;
             let mut district_pops = vec![0.0; num_districts];
             for (node, district) in assignment.iter().enumerate() {
-                district_pops[*district] += cloned_population[node] as f32;
+                district_pops[*district] += cloned_population[node] as f64;
             }
-            let p_avg = district_pops.iter().sum::<f32>() / num_districts as f32;
+            let p_avg = district_pops.iter().sum::<f64>() / num_districts as f64;
             base_objective(assignment)
-                + (pop_constant * district_pops.iter().map(|p| p - p_avg).sum::<f32>()) as f64
+                + (pop_constant * district_pops.iter().map(|p| p - p_avg).sum::<f64>())
         })
     };
 
@@ -158,7 +158,7 @@ fn init_precinct(
     adj: Vec<Vec<usize>>,
     population: Vec<usize>,
     num_districts: usize,
-    pop_thresh: f32,
+    pop_thresh: f64,
     num_threads: u8,
 ) -> Vec<usize> {
     init::init_precinct_with_threads(adj, population, num_districts, pop_thresh, num_threads)
@@ -181,7 +181,7 @@ mod tests {
     };
     use itertools::Itertools;
 
-    const ANNEAL_POP_THRESH: f32 = 0.85;
+    const ANNEAL_POP_THRESH: f64 = 0.85;
     const T0: f64 = 0.1;
     const NUM_THREADS: u8 = 8;
 
@@ -190,23 +190,47 @@ mod tests {
         const SIDE_LEN: usize = 10;
         test_grid::<SingleNodeStrategy>(
             (SIDE_LEN, SIDE_LEN),
-            vec![1; SIDE_LEN * SIDE_LEN],
             2,
             true,
+            vec![1; SIDE_LEN * SIDE_LEN],
+            None,
         );
     }
 
     #[test]
     fn recom() {
         const SIDE_LEN: usize = 4;
-        test_grid::<RecomStrategy>((SIDE_LEN, SIDE_LEN), vec![1; SIDE_LEN * SIDE_LEN], 2, false);
+        test_grid::<RecomStrategy>(
+            (SIDE_LEN, SIDE_LEN),
+            2,
+            false,
+            vec![1; SIDE_LEN * SIDE_LEN],
+            None,
+        );
+    }
+
+    #[test]
+    fn thingy() {
+        test_grid::<RecomStrategy>(
+            (5, 5),
+            3,
+            false,
+            vec![
+                5, 125, 5, 298, 224, 5, 93, 64, 68, 228, 8, 223, 147, 124, 130, 70, 193, 163, 118,
+                81, 96, 13, 115, 5, 160,
+            ],
+            Some(vec![
+                0, 2, 2, 2, 1, 0, 2, 2, 2, 1, 0, 0, 2, 2, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1,
+            ]),
+        )
     }
 
     fn test_grid<S: StepStrategy>(
         dim: (usize, usize),
-        pop: Vec<usize>,
         num_districts: usize,
         pop_constraint: bool,
+        pop: Vec<usize>,
+        starting_state: Option<Vec<usize>>,
     ) {
         let cells = (0..dim.0 * dim.1)
             .map(|i| {
@@ -256,10 +280,13 @@ mod tests {
                     districts[district].union(&MultiPolygon::new(vec![(geometry.clone()).into()]));
             }
 
-            districts
+            let result = districts
                 .iter()
                 .map(|district| district.convex_hull().unsigned_area() / district.unsigned_area())
-                .sum::<f64>()
+                .sum::<f64>();
+
+            dbg!(result);
+            result
         };
 
         let boxed_objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64> = if pop_constraint {
@@ -271,23 +298,27 @@ mod tests {
                 let num_districts = num_districts;
                 let mut district_pops = vec![0.0; num_districts];
                 for (node, district) in assignment.iter().enumerate() {
-                    district_pops[*district] += cloned_population[node] as f32;
+                    district_pops[*district] += cloned_population[node] as f64;
                 }
-                let p_avg = district_pops.iter().sum::<f32>() / num_districts as f32;
+                let p_avg = district_pops.iter().sum::<f64>() / num_districts as f64;
                 objective(assignment)
-                    + (pop_constant * district_pops.iter().map(|p| (p - p_avg).abs()).sum::<f32>())
+                    + (pop_constant * district_pops.iter().map(|p| (p - p_avg).abs()).sum::<f64>())
                         as f64
             })
         };
 
-        let mut annealer = Annealer::<S>::from_starting_state(
+        let starting_state = starting_state.unwrap_or_else(|| {
             init_precinct_with_threads(
                 adj.clone(),
                 pop.clone(),
                 num_districts,
                 ANNEAL_POP_THRESH,
                 NUM_THREADS,
-            ),
+            )
+        });
+
+        let mut annealer = Annealer::<S>::from_starting_state(
+            starting_state,
             adj,
             num_districts,
             pop,
