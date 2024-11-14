@@ -108,12 +108,6 @@ impl<S: StepStrategy> Annealer<S> {
                     .collect_vec();
             });
 
-            dbg!(scores
-                .iter()
-                .flatten()
-                .map(|(x, _)| (self.cur_state.0 - x))
-                .collect_vec());
-            dbg!(temp);
             let adjusted = scores
                 .iter()
                 .flatten()
@@ -163,13 +157,11 @@ impl<S: StepStrategy> Annealer<S> {
         chunk
             .into_iter()
             .map(|step| {
-                crate::print_indexer(|i| stepper.index(&cur_assignment, &step, i), 5, 5);
                 let result = objective(
                     &(0..num_nodes)
                         .map(|i| stepper.index(&cur_assignment, &step, i))
                         .collect_vec(),
                 );
-                dbg!(result);
                 (result, step)
             })
             .collect()

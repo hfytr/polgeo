@@ -237,10 +237,6 @@ impl SegTree {
 
         Self::node_index(&mut nodes, root);
 
-        dbg!(&root);
-        dbg!(&nodes);
-        dbg!(&mapping);
-
         SegTree {
             root,
             nodes,
@@ -288,6 +284,7 @@ impl RecomStrategy {
                 .filter(|x| *x != district1)
                 .collect_vec(),
         );
+        dbg!(district1, district2);
         (district1, district2)
     }
 }
@@ -298,8 +295,6 @@ impl StepStrategy for RecomStrategy {
     fn init(annealer: &Annealer<Self>) -> Self {
         let districts =
             Self::random_districts(&annealer.cur_state.1, &annealer.adj, annealer.num_districts);
-        dbg!(&districts);
-        crate::print_grid(&annealer.cur_state.1, 5);
         RecomStrategy {
             seg_tree: SegTree::wilson(
                 &annealer.adj,
@@ -332,15 +327,14 @@ impl StepStrategy for RecomStrategy {
         &mut self,
         cur_state: &mut Vec<usize>,
         adj: &Vec<Vec<usize>>,
-        cur_assignment: &Vec<usize>,
+        _: &Vec<usize>,
         num_districts: usize,
         step: &Self::Step,
     ) {
         for node in 0..cur_state.len() {
-            cur_state[node] = self.index(&cur_assignment, step, node);
+            cur_state[node] = self.index(&cur_state, step, node);
         }
         self.districts = Self::random_districts(cur_state, adj, num_districts);
-        crate::print_grid(cur_state, 5);
         self.seg_tree = SegTree::wilson(
             adj,
             cur_state

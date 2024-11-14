@@ -255,6 +255,7 @@ def run_gurobi(
     pop_thresh: float,
 ):
     m = gp.Model("flow")
+    m.Params.LogToConsole = 0
 
     n = len(adj)
     x = m.addVars(d, n, vtype=GRB.BINARY, name="x")
@@ -486,8 +487,6 @@ def test_grid(
             pop_constant,
             T0,
         )
-        print(anneal_cycle_hist)
-        pprint_assignment(assignment, num_districts, width)
         (assignment, fit) = run_lp(
             assignment,
             adj,

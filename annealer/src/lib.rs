@@ -186,7 +186,7 @@ mod tests {
     const NUM_THREADS: u8 = 8;
 
     #[test]
-    fn single_node() {
+    fn single_node_mini() {
         const SIDE_LEN: usize = 10;
         test_grid::<SingleNodeStrategy>(
             (SIDE_LEN, SIDE_LEN),
@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn recom() {
+    fn recom_mini() {
         const SIDE_LEN: usize = 4;
         test_grid::<RecomStrategy>(
             (SIDE_LEN, SIDE_LEN),
@@ -210,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn thingy() {
+    fn recom_large() {
         test_grid::<RecomStrategy>(
             (5, 5),
             3,
@@ -285,15 +285,18 @@ mod tests {
                 .map(|district| district.convex_hull().unsigned_area() / district.unsigned_area())
                 .sum::<f64>();
 
-            dbg!(result);
             result
         };
 
+        let pop_constant = if pop_constraint {
+            ANNEAL_POP_THRESH
+        } else {
+            num_districts as f64 / pop.iter().sum::<usize>() as f64
+        };
         let boxed_objective: Box<dyn Send + Sync + Fn(&[usize]) -> f64> = if pop_constraint {
             Box::new(objective)
         } else {
             let cloned_population = pop.clone();
-            let pop_constant = 1.0;
             Box::new(move |assignment: &[usize]| {
                 let num_districts = num_districts;
                 let mut district_pops = vec![0.0; num_districts];
@@ -322,7 +325,7 @@ mod tests {
             adj,
             num_districts,
             pop,
-            ANNEAL_POP_THRESH,
+            pop_constant,
             pop_constraint,
             boxed_objective,
             Box::new(|x| (x * T0).max(0.1)),
